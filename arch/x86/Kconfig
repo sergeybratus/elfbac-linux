@@ -2145,6 +2145,10 @@ config KEYS_COMPAT
 	depends on COMPAT && KEYS
 	default y
 
+config ELF_POLICY
+	bool 
+	depends on X86_64
+	default y
 endmenu
 
 
