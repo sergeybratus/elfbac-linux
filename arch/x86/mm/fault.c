@@ -13,7 +13,8 @@
 #include <linux/perf_event.h>		/* perf_sw_event		*/
 #include <linux/hugetlb.h>		/* hstate_index_to_shift	*/
 #include <linux/prefetch.h>		/* prefetchw			*/
-
+#include <linux/elf-policy.h>
+#include <linux/mm.h>           /* mm_struct */
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
 #include <asm/kmemcheck.h>		/* kmemcheck_*(), ...		*/
@@ -1007,7 +1008,6 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 
 	/* Get the faulting address: */
 	address = read_cr2();
-
 	/*
 	 * Detect and handle instructions that would cause a page fault for
 	 * both a tracked kernel page and a userspace page.
@@ -1060,6 +1060,20 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	/* kprobes don't want to hook the spurious faults: */
 	if (unlikely(notify_page_fault(regs)))
 		return;
+	/* Now switch out the ELF policy segment */
+#ifdef CONFIG_ELF_POLICY
+	if(likely(tsk->policy_segments) && (error_code & PF_INSTR)){
+		if(!ELFP_ADDR_IN_SEGMENT(address,tsk->policy_current_seg->id)){
+			struct elf_policy_region *newregion = elfp_find_region(tsk,(void *)address);
+			printk("Switching from segment %u to %u because of addr hit %p\n",tsk->policy_current_seg->id,newregion->id,(void *)address);
+			if(newregion){
+			  elfp_change_segment(current,newregion);
+				return; /* Retry that page access */
+			}
+		}
+
+	}
+#endif
 	/*
 	 * It's safe to allow irq's after cr2 has been saved and the
 	 * vmalloc fault has been handled.

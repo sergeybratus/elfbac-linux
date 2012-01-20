@@ -2146,7 +2146,7 @@ config KEYS_COMPAT
 	default y
 
 config ELF_POLICY
-	bool 
+	bool "ELF policy support" 
 	depends on X86_64
 	default y
 endmenu

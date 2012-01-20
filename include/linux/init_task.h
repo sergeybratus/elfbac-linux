@@ -126,6 +126,13 @@ extern struct cred init_cred;
 # define INIT_PERF_EVENTS(tsk)
 #endif
 
+#ifdef CONFIG_ELF_POLICY
+# define INIT_POLICY_SEGMENTS(tsk)			\
+	.policy_segments = NULL,			\
+	.policy_current_seg = NULL,
+#else
+# define INIT_POLICY_SEGMENTS(tsk)
+#endif
 /*
  *  INIT_TASK is used to set up the first task table, touch at
  * your own risk!. Base=0, limit=0x1fffff (=2MB)
@@ -192,6 +199,7 @@ extern struct cred init_cred;
 	INIT_FTRACE_GRAPH						\
 	INIT_TRACE_RECURSION						\
 	INIT_TASK_RCU_PREEMPT(tsk)					\
+	INIT_POLICY_SEGMENTS(tsk)				\
 }
 
 

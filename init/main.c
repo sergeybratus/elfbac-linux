@@ -88,6 +88,9 @@ extern void sbus_init(void);
 extern void prio_tree_init(void);
 extern void radix_tree_init(void);
 extern void free_initmem(void);
+#ifdef CONFIG_ELF_POLICY
+extern void elfp_init(void);
+#endif
 #ifndef CONFIG_DEBUG_RODATA
 static inline void mark_rodata_ro(void) { }
 #endif
@@ -638,7 +641,9 @@ asmlinkage void __init start_kernel(void)
 	sfi_init_late();
 
 	ftrace_init();
-
+#ifdef CONFIG_ELF_POLICY
+	elfp_init();
+#endif
 	/* Do the rest non-__init'ed, we're now alive */
 	rest_init();
 }

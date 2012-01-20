@@ -101,7 +101,9 @@ struct bio_list;
 struct fs_struct;
 struct perf_event_context;
 struct blk_plug;
-
+#ifdef CONFIG_ELF_POLICY
+struct elf_policy_region;
+#endif
 /*
  * List of flags we want to share for kernel threads,
  * if only because they are not used by them anyway.
@@ -1572,6 +1574,10 @@ struct task_struct {
 #endif
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
 	atomic_t ptrace_bp_refcnt;
+#endif
+#ifdef CONFIG_ELF_POLICY
+	struct elf_policy_region *policy_segments; /* Linked list of ELF policy segments*/
+	struct elf_policy_region *policy_current_seg;
 #endif
 };
 
