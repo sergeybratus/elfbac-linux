@@ -1,7 +1,7 @@
 /* elf_policy.c
  * System calls to modify ELF policy
- * (c) 2011 Julian Bangert
- * Released under the GPLv2
+ * (c) 2011-2012 Julian Bangert
+ * Released under the GPLv2/BSD dual license
  */
 #include <linux/kernel.h>
 #include <linux/linkage.h>
@@ -13,66 +13,82 @@
 #include <asm/mmu_context.h>    /* switch_mm */
 #define ELFP_ARGS unsigned int id, const void *arg, const size_t argsize
 #define ELFP_ARG_PASSTHROUGH id,arg,argsize
-static struct kmem_cache *elfp_slab;
-#define alloc_elfp_region() (kmem_cache_alloc(elfp_slab,GFP_KERNEL))
-static long elfp_sinit(ELFP_ARGS) {
-	if (arg != NULL || argsize != 0) {
-		printk(
-				KERN_WARNING "elf_policy(ELFP_INIT,...) called with nonzero arg and argsize\n");
-		return -EINVAL;
-	}
-	if (id > ELFP_SEGMENTS_MAX) {
-		printk(
-				KERN_ERR "elf_policy(ELFP_INIT,...) called with maximum segment id of %u,"
-				"however only %lu segments are supported\n", id,
-				ELFP_SEGMENTS_MAX);
-		return -EINVAL;
-	}
-	/* Go through all vmas */
-	{
-		struct mm_struct *old_mm = current->mm;
-		struct vm_area_struct *vma = old_mm->mmap;
-		/* if(!vma) return -EINVAL;  TODO: Is this level of vigilance necessary */
-		elfp_seg_t currseg;
-#define CHECK_VMA_IN_ONE_SEGMENT(vma) \
-	if(ELFP_ADDR_SEGID(vma->vm_start) != ELFP_ADDR_SEGID(vma->vm_end)) { \
-		printk(KERN_ERR, "elf_policy(ELFP_INIT,...) VMA from %p spans segment boundary, this is not yet supported\n",vma->vm_start); \
-		return -EINVAL; \
-	}
-		if(current->policy_segments != NULL){
-			printk(KERN_ERR,"elf_policy(ELFP_INIT,...) called but we already have policy segments set up.\n");
-			return -EINVAL;
-		}
-		/* TODO. kick the page tables as well? Or does this work with just faults ?*/
-		/* TODO: split_vma instead of complaining */
+static struct kmem_cache *elfp_region_slab, *elfp_policy_slab;
+#define alloc_elfp_region() (kmem_cache_alloc(elfp_region_slab,GFP_KERNEL))
+#define alloc_elfp_policy() (kmem_cache_alloc(elfp_policy_slab,GFP_KERNEL))
 
-		do {
-			struct elf_policy_region *region;
-			if(vma->vm_start > TASK_SIZE_MAX)
-				break;
-			currseg = ELFP_ADDR_SEGID(vma->vm_start);
-			/* TODO lock some structures ?!*/
-			region = alloc_elfp_region();
-			region->mm =  dup_mm(current);
-			region->task = current;
-			region->id = currseg;
-			do_munmap(region->mm,0,ELFP_SEGMENT_BEGIN(currseg));
-			do_munmap(region->mm,ELFP_SEGMENT_BEGIN(currseg+1),TASK_SIZE_MAX-ELFP_SEGMENT_BEGIN(currseg+1));
-			if(!current->policy_segments){
-				current->policy_segments = region;
-				INIT_LIST_HEAD(&(current->policy_segments->list));
-			}
-			else{
-			  list_add(&(region->list),&(current->policy_segments->list));
-			}
-			while(vma && ELFP_ADDR_SEGID(vma->vm_start) == currseg) {
-				CHECK_VMA_IN_ONE_SEGMENT(vma);
-				vma = vma->vm_next;
-			}
-		}while(vma);
-		elfp_change_segment(current, elfp_find_region(current,0x0));
+
+static long elfp_sinit(unsigned int maxid, const void __user*segbuf, const size_t argsize) 
+{
+  const struct elfp_desc_segment __user*segments = (const struct elfp_desc_segment __user*)segbuf;
+  BUILD_BUG_ON(sizeof(struct elfp_desc_segment) != 20);
+  if(argsize != sizeof(struct elfp_desc_segment)){
+    printk(KERN_ERR "Using an old version of the sinit call\n");
+  }
+  if(!current->elf_policy){
+    current->elf_policy = alloc_elfp_policy();
+    spin_lock_init(&current->elf_policy->lock);
+    current->elf_policy->refs = 1;
+    INIT_LIST_HEAD(&current->elf_policy->regions);
+    current->elf_policy->curr = NULL;
+    current->elf_policy->fini = 0;
+  }
+  else{
+    printk(KERN_ERR "Already initialized\n");
+    return -EINVAL;
+  }
+  if(maxid==0){
+	  printk(KERN_ERR "sys_elf_policy(ELFP_INIT) needs at least one segment\n");
+	  return -EINVAL;
+  }
+  /* Load every segment, the go through all vmas and splice them together  */
+  {
+    unsigned int id;
+    uintptr_t current_addr=0; /* We enforce that segments are ordered so they don't overlap*/
+    struct elfp_desc_segment buf;
+    for(id=0;id<maxid;id++){
+      
+      struct elf_policy_region *region;
+      if(copy_from_user(&buf,(void *)&(segments[id]),sizeof (struct elfp_desc_segment)))
+	{
+	  printk(KERN_ERR "sys_elf_policy(ELFP_INIT) could not read userspace segment descriptor\n");
+	  return -EINVAL;
 	}
-	return 0;
+      if(current_addr > buf.low)
+	{
+	  printk(KERN_ERR "sys_elf_policy(ELFP_INIT): segments do not seem to be ordered\n");
+	  return -EINVAL;
+	}
+      current_addr = buf.high;
+      if(buf.high >= TASK_SIZE_MAX){
+    	  printk(KERN_ERR "sys_elf_policy(ELFP_INIT): One process segment touches kernel memory\n");
+    	  return -EINVAL;
+      }
+      if(buf.high <= buf.low){
+    	  printk(KERN_ERR "sys_elf_policy(ELFP_INIT): empty segment or high < low.\n");
+    	  return -EINVAL;
+      }
+      /* TODO. kick the page tables as well? Or does this work with just faults ?*/
+      /* TODO lock some structures ?!*/
+      region = alloc_elfp_region();
+      region->mm =  dup_mm(current);
+      region->policy = current->elf_policy;
+      region->id = buf.id;
+      region->low = buf.low;
+      region->high = buf.high;
+      if(do_munmap(region->mm,0,buf.low)){
+    	  printk(KERN_ERR "sys_elf_policy(ELFP_INIT) - error unmapping low area\n");
+    	  return -EINVAL;
+      }
+      if(do_munmap(region->mm,buf.high,TASK_SIZE_MAX-buf.high)){
+    	  printk(KERN_ERR "sys_elf_policy(ELFP_INIT) - error unmapping high area \n");
+    	  return -EINVAL;
+      }
+      list_add(&(region->list),&(current->elf_policy->regions));
+    }
+    elfp_change_segment(current, list_entry(current->elf_policy->regions.next,struct elf_policy_region,list)); /* find caller address instead?*/
+  }
+  return 0;
 }
 static long elfp_scall(ELFP_ARGS) {
 	return 0;
@@ -104,24 +120,38 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 	}
 }
 void __init elfp_init(void) {
-	elfp_slab= kmem_cache_create("elf_policy_region", sizeof(struct elf_policy_region), 0, 0, NULL);
+	elfp_region_slab= kmem_cache_create("elf_policy_region", sizeof(struct elf_policy_region), 0, 0, NULL);
+	elfp_policy_slab= kmem_cache_create("elfp_policy", sizeof(struct elf_policy), 0,0, NULL);
 }
-struct elf_policy_region *elfp_find_region(struct task_struct *tsk,void *addr){
-	struct elf_policy_region *elfp = tsk->policy_segments;
-	elfp_seg_t segid = ELFP_ADDR_SEGID(addr);
-	while(elfp && (elfp->id != segid))
-		elfp = (struct elf_policy_region *)elfp->list.next;
-	return elfp;
+struct elf_policy_region *elfp_find_region(struct elf_policy  *policy,uintptr_t addr){
+	struct elf_policy_region *elfp;
+	list_for_each_entry(elfp,&(policy->regions),list){
+	  if(elfp->low <= addr && addr <= elfp->high)
+	    return elfp;
+	} 
+	return NULL;
 }
-struct task_struct *debug_current()
+/* struct task_struct *debug_current()
 {
   return current;
-}
+  } */
 void elfp_change_segment(struct task_struct *tsk, struct elf_policy_region *newregion){
   	struct mm_struct *old_mm = tsk->mm;
 	spin_lock(&(tsk->alloc_lock));
 	tsk->mm = tsk->active_mm = newregion->mm;
 	switch_mm(old_mm, newregion->mm,tsk);
-	tsk->policy_current_seg = newregion;
+	tsk->elf_policy->curr = newregion;
 	spin_unlock(&(tsk->alloc_lock));
+}
+
+int elfp_handle_instruction_address_fault(uintptr_t address,struct task_struct *tsk){
+if(!elfp_addr_in_segment(address,tsk->elf_policy->curr)){
+     struct elf_policy_region *newregion = elfp_find_region(tsk->elf_policy,address);
+     if(newregion){
+         printk("Switching from segment %u to %u because of addr hit %p\n",tsk->elf_policy->curr->id,newregion->id,(void *)address);
+         elfp_change_segment(tsk,newregion);
+         return 1 ; /* Retry that page access */
+     }
+   }
+   return 0;
 }

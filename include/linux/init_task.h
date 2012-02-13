@@ -128,8 +128,7 @@ extern struct cred init_cred;
 
 #ifdef CONFIG_ELF_POLICY
 # define INIT_POLICY_SEGMENTS(tsk)			\
-	.policy_segments = NULL,			\
-	.policy_current_seg = NULL,
+	.elf_policy = NULL,			
 #else
 # define INIT_POLICY_SEGMENTS(tsk)
 #endif

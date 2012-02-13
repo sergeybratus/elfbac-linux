@@ -1576,8 +1576,7 @@ struct task_struct {
 	atomic_t ptrace_bp_refcnt;
 #endif
 #ifdef CONFIG_ELF_POLICY
-	struct elf_policy_region *policy_segments; /* Linked list of ELF policy segments*/
-	struct elf_policy_region *policy_current_seg;
+	struct elf_policy *elf_policy; /* Linked list of ELF policy segments*/
 #endif
 };
 

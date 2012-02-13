@@ -1062,16 +1062,9 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		return;
 	/* Now switch out the ELF policy segment */
 #ifdef CONFIG_ELF_POLICY
-	if(likely(tsk->policy_segments) && (error_code & PF_INSTR)){
-		if(!ELFP_ADDR_IN_SEGMENT(address,tsk->policy_current_seg->id)){
-			struct elf_policy_region *newregion = elfp_find_region(tsk,(void *)address);
-			printk("Switching from segment %u to %u because of addr hit %p\n",tsk->policy_current_seg->id,newregion->id,(void *)address);
-			if(newregion){
-			  elfp_change_segment(current,newregion);
-				return; /* Retry that page access */
-			}
-		}
-
+	if(likely(tsk->elf_policy) && (error_code & PF_INSTR)){
+	  if(elfp_handle_instruction_address_fault(address,tsk))
+	    return;
 	}
 #endif
 	/*
