@@ -145,7 +145,7 @@ void elfp_change_segment(struct task_struct *tsk, struct elf_policy_region *newr
 }
 
 int elfp_handle_instruction_address_fault(uintptr_t address,struct task_struct *tsk){
-if(!elfp_addr_in_segment(address,tsk->elf_policy->curr)){
+	if(!elfp_addr_in_segment(address,tsk->elf_policy->curr)){
      struct elf_policy_region *newregion = elfp_find_region(tsk->elf_policy,address);
      if(newregion){
          printk("Switching from segment %u to %u because of addr hit %p\n",tsk->elf_policy->curr->id,newregion->id,(void *)address);
@@ -154,4 +154,19 @@ if(!elfp_addr_in_segment(address,tsk->elf_policy->curr)){
      }
    }
    return 0;
+}
+int elfp_handle_data_address_fault(uintptr_t addr,struct task_struct *tsk,int write){
+	if(!elfp_addr_in_segment(address,tsk->elf_policy->curr)){
+		struct elf_policy_region *newregion = elfp_find_region(tsk->elf_policy,address);
+		if(newregion){ // Also check that read/write is allowed
+			struct vm_area_struct *vma = find_vma(tsk->mm, address);
+			if((vma.vm_start < newregion->low ) ||(vma.vm_end > newregion->high))
+			{
+				printk(KERN_ERR "Attempting to do a code access in a vma that crosses segments\n");
+				return 0;
+			}
+
+		}
+	}
+	return 0;
 }
