@@ -14,6 +14,7 @@ struct  __attribute__((__packed__)) elfp_desc_segment{
 #ifdef __KERNEL__
 #include <linux/list.h>
 #include <linux/sched.h>
+extern int vma_dup_at_addr(struct mm_struct *mm, struct mm_struct *oldmm,uintptr_t addr);
 extern void __init elfp_init(void);
 struct elf_policy;
 extern struct elf_policy_region* elfp_find_region(struct elf_policy *tsk, uintptr_t addr);
@@ -54,18 +55,12 @@ extern int elfp_handle_instruction_address_fault(uintptr_t address,struct task_s
  * Initially, all actions are allowed. Calling one of these changes this permissive policy into a restrictive policy.
  * Calling the same function twice overwrites the previous results, i.e. you have to specify all permissions at once.
  */
-#define ELFP_CALL 2 /*Allow free calls = jumps between segments. If the code ever returns, it has to return.
-Stack read permissions should be added*/
-struct elf_policy_call{ /* No restriction on target addresses, returns are handled*/
-	elfp_id_t segfrom;
-	elfp_id_t segto;
-};
 #define ELFP_READ 3 /* Allow reading data */
 typedef struct elf_policy_call elf_policy_read; /* same definition */
 #define ELFP_WRITE 4 /* Allow writing data */
 typedef elf_policy_read elf_policy_write;
-#define ELFP_SAFECALL 5/* Allow a specified call */
-struct elf_policy_safecall {
+#define ELFP_CALL 2/* Allow a specified call */
+struct elf_policy_call {
 	void * call_addr; /* Called address. First so we have good alignment*/
 	unsigned int params_size;
 	unsigned int return_size;
