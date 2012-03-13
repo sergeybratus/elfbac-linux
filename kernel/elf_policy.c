@@ -108,19 +108,23 @@ static long elfp_swrite(ELFP_ARGS) {
 static long elfp_ssafecall(ELFP_ARGS) {
 	return 0;
 }
+extern void pcid_init();
 asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 		const void *arg, const size_t argsize) {
 	switch (function) {
 	case ELFP_INIT:
 		return elfp_sinit(ELFP_ARG_PASSTHROUGH);
-	case ELFP_CALL:
+		/*	case ELFP_CALL:
 		return elfp_scall(ELFP_ARG_PASSTHROUGH);
 	case ELFP_READ:
 		return elfp_sread(ELFP_ARG_PASSTHROUGH);
 	case ELFP_WRITE:
 		return elfp_swrite(ELFP_ARG_PASSTHROUGH);
 	case ELFP_SAFECALL:
-		return elfp_ssafecall(ELFP_ARG_PASSTHROUGH);
+	return elfp_ssafecall(ELFP_ARG_PASSTHROUGH); */
+	case 500: /* DIRTY HACKS */
+		pcid_init();
+		return;
 	default:
 		return -EINVAL;
 	}
@@ -172,7 +176,7 @@ int elfp_handle_data_address_fault(uintptr_t address, struct task_struct *tsk) {
 	if (!elfp_addr_in_segment(address, tsk->elf_policy->curr)) {
 		struct elf_policy_region *oldregion = elfp_find_region(tsk->elf_policy,
 				address);
-		if (newregion) {
+		if (oldregion) {
 			printk("Copying vma to segment %u from  %u because of fault at %p\n ",
 					tsk->elf_policy->curr->id, oldregion->id, (void *) address);
 			vma_dup_at_addr(tsk->elf_policy->curr->mm,oldregion->mm, address);

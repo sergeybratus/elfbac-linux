@@ -55,6 +55,21 @@
 #include <asm/uv/uv.h>
 #include <asm/setup.h>
 
+#ifdef CONFIG_MM_PCID
+atomic_t pcid_current_generation = ATOMIC_INIT(0);
+atomic_t pcid_current_block = ATOMIC_INIT(0);
+DEFINE_PER_CPU(pcid_t, current_pcid) = 0;
+DEFINE_PER_CPU(pcid_t, max_pcid_block) = 0;
+DEFINE_PER_CPU(pcid_generation_t, cpu_pcid_generation) =0 ;
+void pcid_init(){
+	if(cpu_has_pcid){
+		atomic_set(&pcid_current_generation,1);
+		set_in_cr4(X86_CR4_PCIDE);
+	}
+}
+#else
+void pcid_init() {}
+#endif
 static int __init parse_direct_gbpages_off(char *arg)
 {
 	direct_gbpages = 0;
@@ -635,6 +650,7 @@ void __init paging_init(void)
 	node_clear_state(0, N_NORMAL_MEMORY);
 
 	free_area_init_nodes(max_zone_pfns);
+	//pcid_init();
 }
 
 /*
