@@ -164,8 +164,8 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
 		struct elf_policy_region *newregion = elfp_find_region(tsk->elf_policy,
 				address);
 		if (newregion) {
-			printk("Switching from segment %u to %u because of fault at %p\n",
-					tsk->elf_policy->curr->id, newregion->id, (void *) address);
+		  //printk("Switching from segment %u to %u because of fault at %p\n",
+		  //					tsk->elf_policy->curr->id, newregion->id, (void *) address);
 			elfp_change_segment(tsk, newregion);
 			return 1; /* Retry that page access */
 		}
@@ -177,8 +177,8 @@ int elfp_handle_data_address_fault(uintptr_t address, struct task_struct *tsk) {
 		struct elf_policy_region *oldregion = elfp_find_region(tsk->elf_policy,
 				address);
 		if (oldregion) {
-			printk("Copying vma to segment %u from  %u because of fault at %p\n ",
-					tsk->elf_policy->curr->id, oldregion->id, (void *) address);
+		  //	printk("Copying vma to segment %u from  %u because of fault at %p\n ",
+		  //			tsk->elf_policy->curr->id, oldregion->id, (void *) address);
 			vma_dup_at_addr(tsk->elf_policy->curr->mm,oldregion->mm, address);
 			return 1;
 		}

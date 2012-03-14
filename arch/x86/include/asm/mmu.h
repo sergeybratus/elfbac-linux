@@ -37,9 +37,9 @@ typedef struct {
 #ifdef CONFIG_MM_PCID
 	/*
 	 *  Both initialised to 0 in ldt.c .  If the processor does not support PCID
-	 *  current generation is always 0 as well, so the PCID is never changed.
-	 *  If the processor supports PCID, generation is always larger than 1
-	 */
+	*  current generation is always 0 as well, so the PCID is never changed.
+	*  If the processor supports PCID, generation is always larger than 1
+	*/
 	pcid_generation_t pcid_generation;
 	pcid_t pcid; /* Process context identifier. A TLB tag for AMD64 architectures */
 #endif

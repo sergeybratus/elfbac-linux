@@ -1060,13 +1060,7 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 	/* kprobes don't want to hook the spurious faults: */
 	if (unlikely(notify_page_fault(regs)))
 		return;
-	/* Now switch out the ELF policy segment */
-#ifdef CONFIG_ELF_POLICY
-	if(likely(tsk->elf_policy) && (error_code & PF_INSTR)){
-	  if(elfp_handle_instruction_address_fault(address,tsk))
-	    return;
-	}
-#endif
+
 	/*
 	 * It's safe to allow irq's after cr2 has been saved and the
 	 * vmalloc fault has been handled.
@@ -1081,7 +1075,13 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		if (regs->flags & X86_EFLAGS_IF)
 			local_irq_enable();
 	}
-
+		/* Now switch out the ELF policy segment */
+#ifdef CONFIG_ELF_POLICY
+	if(likely(tsk->elf_policy) && (error_code & PF_INSTR)){
+	  if(elfp_handle_instruction_address_fault(address,tsk))
+	    return;
+	}
+#endif
 	if (unlikely(error_code & PF_RSVD))
 		pgtable_bad(regs, error_code, address);
 

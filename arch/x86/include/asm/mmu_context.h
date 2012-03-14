@@ -50,16 +50,22 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 		cpumask_set_cpu(cpu, mm_cpumask(next));
 #ifdef CONFIG_MM_PCID
 		global_gen = atomic_read(&pcid_current_generation);
-		if(next->context.pcid_generation != global_gen){
+		if(unlikely(next->context.pcid_generation != global_gen)){
 			/*
 			 * Now we need a new PCID. All CPUs share one PCID space and so to avoid
 			 * contestion around a single counter, each CPU gets a block of PCIDs for itself
 			 */
 			pcid_t pcid;
 newpcid:	pcid = get_cpu_var(current_pcid)++;
-			if(__get_cpu_var(cpu_pcid_generation) != global_gen || pcid>  __get_cpu_var(max_pcid_block))
+			if(unlikely(__get_cpu_var(cpu_pcid_generation) != global_gen)){
+				local_flush_tlb();
+				__get_cpu_var(cpu_pcid_generation) = global_gen;
+				pcid = PCID_MAX + 1; /* will be larger than max_pcid_block */
+			}
+			if(unlikely(pcid>  __get_cpu_var(max_pcid_block)))
 			{
-				int pcid_block = atomic_add_return(PCID_BLOCK_SIZE, &pcid_current_block);
+				int pcid_block;
+newblock:		pcid_block = atomic_add_return(PCID_BLOCK_SIZE, &pcid_current_block);
 				if(pcid_block <= PCID_MAX) {
 					__get_cpu_var(max_pcid_block) = pcid_block;
 					__get_cpu_var(current_pcid) = pcid_block - PCID_BLOCK_SIZE + 1;
@@ -69,7 +75,8 @@ newpcid:	pcid = get_cpu_var(current_pcid)++;
 				else{
 					/* Now we need to reset the PCID generation and flush everything */
 					global_gen = atomic_add_return(1,&pcid_current_generation);
-					put_cpu_var(current_pcid);
+					__get_cpu_var(cpu_pcid_generation) = global_gen;
+					atomic_set(&pcid_current_block,0);
 					if(global_gen <= 0){ /* Bad integer overflow */
 						printk(KERN_ERR "PCID generation overflow. Should not happen during the lifetime of normal hardware. "
 								"Probably ok, but bad things might happen, so consider rebooting to reset the PCID generation.\n");
@@ -77,12 +84,14 @@ newpcid:	pcid = get_cpu_var(current_pcid)++;
 						 * Assume we burn through 1 PCID generation per second, we still get 65 years  without this behavior*/
 						global_gen = 1;
 					}
-					flush_tlb_all();
-					get_cpu_var(current_pcid); //just to reacquire the lock
-					goto newpcid;
+					printk("PCID generation reset. CPU %u PCID %d pcid_generation %d \n",cpu, pcid, next->context.pcid_generation);
+					local_flush_tlb();
+					goto newblock;
 				}
 			}
 			put_cpu_var(current_pcid);
+			next->context.pcid_generation  = __get_cpu_var(cpu_pcid_generation);
+			next->context.pcid = pcid;
 		}
 
 		load_cr3((pgd_t *)((uintptr_t) next->pgd | (uintptr_t) next->context.pcid));
