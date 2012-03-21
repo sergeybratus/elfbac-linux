@@ -94,7 +94,7 @@ newblock:		pcid_block = atomic_add_return(PCID_BLOCK_SIZE, &pcid_current_block);
 			next->context.pcid = pcid;
 		}
 
-		load_cr3((pgd_t *)((uintptr_t) next->pgd | (uintptr_t) next->context.pcid));
+		load_cr3((pgd_t *)((uintptr_t) next->pgd | (uintptr_t) next->context.pcid | (uintptr_t) (1ul<<63))); /*Set bit 63 so the TLB does not get flushed */
 #else
 		/* Re-load page tables */
 		load_cr3(next->pgd);
