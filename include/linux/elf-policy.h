@@ -6,65 +6,72 @@
 #ifndef LINUX_ELF_POLICY_H
 #define LINUX_ELF_POLICY_H
  typedef u_int32_t elfp_id_t;
-struct  __attribute__((__packed__)) elfp_desc_segment{
+ struct __attribute__ ((__packed__)) elfp_desc_header{
+	 unsigned int statecount, rwcount,callcount;
+ }
+struct  __attribute__((__packed__)) elfp_desc_state{
   uintptr_t low; /* User space begin pointer */
   uintptr_t high; /* User space end pointer */
   elfp_id_t id;
 };
+#define ELFP_RW_READ( 1u << 0)
+#define ELFP_RW_WRITE ( 1u << 1)
+#define ELFP_RW_ALL (ELFP_READ | ELFP_WRITE)
+struct __attribute__((__packed__)) elfp_desc_readwrite{
+	elfp_id_t from;
+	elfp_id_t to;
+	unsigned int type;
+}
+struct __attribute__ ((__packed__)) elfp_desc_call{
+	elfp_id_t from,to;
+	uintptr_t offset;
+	unsigned short parambytes;
+	unsigned short returnbytes;
+}
 #ifdef __KERNEL__
-#include <linux/list.h>
-#include <linux/sched.h>
-extern int vma_dup_at_addr(struct mm_struct *mm, struct mm_struct *oldmm,uintptr_t addr);
-extern void __init elfp_init(void);
 struct elf_policy;
-extern struct elf_policy_region* elfp_find_region(struct elf_policy *tsk, uintptr_t addr);
-extern void elfp_change_segment(struct task_struct *tsk, struct elf_policy_region *newregion);
-struct elf_policy_region;
+struct elf_policy_state;
+struct elf_policy_call_transition;
+struct elf_policy_data_transition;
+#include <linux/elf-policy-linux.h>
 struct elf_policy{
-  struct list_head regions;
-  struct elf_policy_region *curr; /* current is a macro*/
-  spinlock_t lock;
-  unsigned int refs;
-  unsigned int fini; /* 1 - do not allow more updates */
+  struct elf_policy_state *states;
+  elfp_atomic_ctr_t refs; /*should be made atomic_t */
 };
-struct elf_policy_region {
-  struct list_head list;
-  struct mm_struct *mm;
+struct elf_policy_state {
+  elfp_context_t *context;
+  uintptr_t codelow,codehigh;
+  struct elf_policy_call_transition *calls;
+  struct elf_policy_data_transition *data;
+  struct elf_policy_state *prev,*next;
   struct elf_policy *policy; /* Also has the lock */
-  uintptr_t low,high;
-  unsigned int id;
+  elfp_id_t id;
 };
-inline static uintptr_t elfp_segment_begin(struct elf_policy_region *segment){
-  return segment->low;
-}
-inline static uintptr_t elfp_segment_end(struct elf_policy_region *segment){
-  return segment->high;
-}
-inline static ptrdiff_t elfp_segment_length(struct elf_policy_region *segment){
-  return elfp_segment_end(segment) - elfp_segment_begin(segment);
-}
-inline static int elfp_addr_in_segment(uintptr_t addr, struct elf_policy_region *segment) {
-  if(addr > elfp_segment_begin(segment) && addr < elfp_segment_end(segment))
-    return 1;
-  else
-    return 0;
-}
-extern int elfp_handle_instruction_address_fault(uintptr_t address,struct task_struct *tsk);
-#define ELFP_INIT 1 /* segment is is the largest segment id that is going to be used, arg is NULL */
-/*
- * Initially, all actions are allowed. Calling one of these changes this permissive policy into a restrictive policy.
- * Calling the same function twice overwrites the previous results, i.e. you have to specify all permissions at once.
- */
-#define ELFP_READ 3 /* Allow reading data */
-typedef struct elf_policy_call elf_policy_read; /* same definition */
-#define ELFP_WRITE 4 /* Allow writing data */
-typedef elf_policy_read elf_policy_write;
-#define ELFP_CALL 2/* Allow a specified call */
-struct elf_policy_call {
-	void * call_addr; /* Called address. First so we have good alignment*/
-	unsigned int params_size;
-	unsigned int return_size;
-	elfp_id_t segfrom;
+struct elf_policy_call_transition{
+	struct elf_policy_call_transition *left,*right; /* Sorted by 'from', the 'to' */
+	struct elf_policy_state *from,*to;
+	uintptr_t offset;
+	unsigned short parambytes;
+	unsigned short returnbytes;
 };
+struct elf_policy_data_transition {
+	struct elf_policy_data_transition *left,*right; /* Sorted by  */
+	struct elf_policy_state *from,*to;
+	uintptr_t low, high;
+	unsigned short type; /* READ / WRITE flags */
+};
+/* OS primitives*/
+extern int elfp_os_change_context(elfp_process_t *tsk,elfp_context_t *context);
+extern int elfp_os_copy_mapping(struct elfp_process_t *from,struct elfp_addr_space *to, uintptr_t start, uintptr_t end);
+extern int elfp_os_copy_stack_bytes(elfp_context_t *from,elfp_context_t *to,size_t nbytes);
+/* VM hooks */
+extern int elfp_parse_policy(uintptr_t policy_offset_start,uintptr_t policy_size, elfp_process_t *tsk);
+extern int elfp_free_policy(struct elf_policy *policy);
+extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk);
+extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk);
+
+inline int elfp_address_in_segment(uintptr_t address,elf_policy_state *state){
+	return (address >= state->codelow) && (address <= state->codehigh);
+}
 #endif
 #endif

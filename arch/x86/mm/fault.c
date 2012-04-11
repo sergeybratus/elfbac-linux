@@ -1078,8 +1078,14 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		/* Now switch out the ELF policy segment */
 #ifdef CONFIG_ELF_POLICY
 	if(likely(tsk->elf_policy) && (error_code & PF_INSTR)){
-	  if(elfp_handle_instruction_address_fault(address,tsk))
-	    return;
+		if(error_code & PF_INSTR){
+			if(elfp_handle_instruction_address_fault(address,tsk))
+				return;
+		}
+		else{
+			if(elfp_handle_data_address_fault(address,tsk))
+				return;
+		}
 	}
 #endif
 	if (unlikely(error_code & PF_RSVD))

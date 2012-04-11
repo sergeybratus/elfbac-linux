@@ -11,9 +11,9 @@
 #include <linux/sched.h>
 #include <linux/mm.h>
 #include <asm/mmu_context.h>    /* switch_mm */
+#include "elf_policy_linux.c"
 #define ELFP_ARGS unsigned int id, const void *arg, const size_t argsize
 #define ELFP_ARG_PASSTHROUGH id,arg,argsize
-static struct kmem_cache *elfp_region_slab, *elfp_policy_slab;
 #define alloc_elfp_region() (kmem_cache_alloc(elfp_region_slab,GFP_KERNEL))
 #define alloc_elfp_policy() (kmem_cache_alloc(elfp_policy_slab,GFP_KERNEL))
 
@@ -24,6 +24,7 @@ static long elfp_sinit(unsigned int maxid, const void __user*segbuf,
 	BUILD_BUG_ON(sizeof(struct elfp_desc_segment) != 20);
 	if (argsize != sizeof(struct elfp_desc_segment)) {
 		printk(KERN_ERR "Using an old version of the sinit call\n");
+		return;
 	}
 	if (!current->elf_policy) {
 		current->elf_policy = alloc_elfp_policy();
@@ -129,12 +130,6 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 		return -EINVAL;
 	}
 }
-void __init elfp_init(void) {
-	elfp_region_slab = kmem_cache_create("elf_policy_region",
-			sizeof(struct elf_policy_region), 0, 0, NULL);
-	elfp_policy_slab = kmem_cache_create("elfp_policy",
-			sizeof(struct elf_policy), 0, 0, NULL);
-}
 struct elf_policy_region *elfp_find_region(struct elf_policy *policy,
 		uintptr_t addr) {
 	struct elf_policy_region *elfp;
@@ -157,32 +152,192 @@ void elfp_change_segment(struct task_struct *tsk,
 	tsk->elf_policy->curr = newregion;
 	spin_unlock(&(tsk->alloc_lock));
 }
-
 int elfp_handle_instruction_address_fault(uintptr_t address,
-		struct task_struct *tsk) {
-	if (!elfp_addr_in_segment(address, tsk->elf_policy->curr)) {
-		struct elf_policy_region *newregion = elfp_find_region(tsk->elf_policy,
-				address);
-		if (newregion) {
-		  //printk("Switching from segment %u to %u because of fault at %p\n",
-		  //					tsk->elf_policy->curr->id, newregion->id, (void *) address);
-			elfp_change_segment(tsk, newregion);
-			return 1; /* Retry that page access */
+		struct elfp_process_t *tsk) {
+	struct elf_policy_state *state = elfp_task_get_current_state(tsk);
+	if (!elfp_address_in_segment(address,state)) {
+		struct elf_policy_call_transition *transition = state->calls;
+		while(transition && (transition->offset != address)){
+			if(transition->offset < address)
+				transition = transition->left;
+			else
+				transition = transition->right;
 		}
-	}
-	return 0;
-}
-int elfp_handle_data_address_fault(uintptr_t address, struct task_struct *tsk) {
-	if (!elfp_addr_in_segment(address, tsk->elf_policy->curr)) {
-		struct elf_policy_region *oldregion = elfp_find_region(tsk->elf_policy,
-				address);
-		if (oldregion) {
-		  //	printk("Copying vma to segment %u from  %u because of fault at %p\n ",
-		  //			tsk->elf_policy->curr->id, oldregion->id, (void *) address);
-			vma_dup_at_addr(tsk->elf_policy->curr->mm,oldregion->mm, address);
+		if(unlikely(!transition)){
+			return 0; /* Kill process */
+		}
+		else{
+			elfp_os_change_context(transition->to);/* TODO: Copy stack, handle return */
 			return 1;
 		}
 	}
+	return 0; /* Fail */
+}
+int elfp_handle_data_address_fault(uintptr_t address, struct task_struct *tsk,int access_type){
+	struct elf_policy_state *state = elfp_task_get_current_state(tsk);
+	struct elf_policy_data_transition *transition = state->data;
+	while(transition && (transition->high < address || transition->low >address)){
+		if(adress < transition->low)
+			transition = transition->left;
+		else /* address > transition->high */
+			transition = transition->right;
+	}
+	if(transition){
+		if(state == transition->to){
+			elfp_os_copy_mapping(tsk,state->context, transition->low, transition->high);
+			return 1;
+		}
+		else{
+			elfp_os_change_context(transition->to);
+			return 1;
+		}
+	}
+	else
+		return 0; /* Kill process ? */
 	return 0;
 }
+inline int elfp_read_safe(uintptr_t start,uintptr_t end, uintptr_t offset, size_t s,void *buf){
+	unsigned long tmp;
+	if(offset< start)
+		return 0;
+	if(offset+s > end)
+		return 0;
+	while(s){
+		tmp = elfp_read_policy(offset,buf,s);
+		if(!tmp) return -1;
+		s -= tmp;
+		offset += tmp;
+		buf += tmp;
+	}
+	return 0;
+}
+static int elfp_insert_data_transition(struct elf_policy_data_transition *data){
+	struct elf_policy_data_transition ** tree = &(data->from->data);
+	while (*tree) {
+		if ((*tree)->to > data->to)
+			*tree = &((*tree)->left);
+		else if ((*tree)->to < data->to)
+			*tree = &((*tree)->right);
+		else {/* We do not need to sort on high, but TODO: make sure they don't overlap */
+			if ((*tree)->low < data->low)
+				*tree = &((*tree)->left);
+			else {
+				*tree = &((*tree)->right);
+			}
+		}
+	}
+	*tree = data;
+	data->left = data->right =NULL;
+	return 0;
+}
+static int elfp_insert_call_transition(struct elf_policy_call_transition *data){
+	struct elf_policy_call_transition **tree = &(data->from->calls);
+	while(*tree){
+		if ((*tree)->to > data->to)
+				*tree = &((*tree)->left);
+		else if((*tree)->to < data->to)
+				*tree =  &((*tree)->right);
+		else {/* We do not need to sort on high, but TODO: make sure they don't overlap */
+			if((*tree)->offset < data->offset)
+				*tree = &((*tree)->left);
+			else {
+				*tree =  &((*tree)->right);
+			}
+		}
+	}
+	*tree = data;
+	data->left = data->right = NULL;
+	return 0;
+}
+static struct elf_policy_state *elfp_find_state_by_id(struct elf_policy*pol, elfp_id_t id){
+	struct elf_policy_state *retval = pol->states;
+	while(retval && id!=retval->id)
+		retval = retval->next;
+	if(retval)
+		return retval;
+	else
+		return NULL;
+}
+int elfp_parse_policy(uintptr_t start,uintptr_t end, elfp_process_t *tsk){
+	struct elf_policy *pol;
+	struct elfp_desc_header hdr;
+	uintptr_t off = start;
+	if(elfp_read_safe(off,end,off,sizeof hdr,&hdr)
+		return -EIO;
+	off+= sizeof hdr;
+	pol = elfp_alloc_policy();
+	if(!pol)
+		return -ENOMEM;
+	pol->states = NULL;
+	pol->refs = 0;
+	while(hdr.statecount-- > 0){
+		struct elfp_desc_state buf;
+		struct elfp_policy_state *state = elfp_alloc_state();
+		if(!state)
+			return -ENOMEM; /*TODO: free */
+		state->prev = NULL;
+		state->next = pol->states;
+		if(pol->states){
+			pol->states->prev = state;
+		}
+		pol->states = state;
 
+		if(elfp_read_safe(off,end,sizeof buf,&buf))
+			return -EIO;
+		off += sizeof buf;
+		state->codelow = buf.low;
+		state->codehigh = buf.high;
+		state->id  = buf.id;
+		state->policy = pol;
+		state->calls = state->data = NULL;
+		state->context = TODODODODO;
+	}
+	while(hdr.rwcount-- > 0){
+		struct elfp_desc_readwrite buf;
+		struct elfp_policy_data_transition *data = elfp_alloc_data_transition();
+		if(!data)
+			return -ENOMEM;
+		if(elfp_read_safe(off,end,sizeof buf,&buf))
+			return -EIO;
+		off += sizeof buf;
+
+		data->left = data->right = NULL;
+		data->from = elfp_find_state_by_id(pol,buf.from);]
+		if(!data->from){
+			return -EINVAL;
+		}
+		data->to = elfp_find_state_by_id(pol,buf.to);
+		if(!data->to){
+			return -EINVAL;
+		}
+		data->low = buf.low;
+		data->high = buf.high;
+		data->type = buf.type & ELFP_RW_ALL;
+		elfp_insert_data_transition(data);
+	}
+	while(hdr.callcount-- > 0){
+		struct elfp_desc_call;
+		struct elfp_policy_call_transition *data = elfp_alloc_call_transition();
+		if(!data)
+			return -ENOMEM;
+		if(elfp_read_safe(off,end,sizeof buf,&buf))
+			return -EIO;
+		off += sizeof buf;
+		data->left = data->right = NULL;
+		data->from = elfp_find_state_by_id(pol,buf.from);x
+		if(!data->from){
+			return -EINVAL;
+		}
+		data->to = elfp_find_state_by_id(pol,buf.to);
+		if(!data->to){
+			return -EINVAL;
+		}
+		data->offset = buf.offset;
+		data->parambytes = buf.parambytes;
+		data->returnbytes = buf.returnbytes;
+
+		elfp_insert_call_transition(data);
+	}
+	elfp_task_set_policy(tsk,pol);
+	return 0;
+}
