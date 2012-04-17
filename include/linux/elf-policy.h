@@ -53,12 +53,18 @@ struct elf_policy_call_transition{
 	uintptr_t offset;
 	unsigned short parambytes;
 	unsigned short returnbytes;
+	struct elf_policy_call_transition *next;
 };
 struct elf_policy_data_transition {
 	struct elf_policy_data_transition *left,*right; /* Sorted by  */
 	struct elf_policy_state *from,*to;
 	uintptr_t low, high;
 	unsigned short type; /* READ / WRITE flags */
+};
+/* How to handle returns? */
+struct elf_policy_stack_frame{ /* TODO: add calls that cannot be returned from!*/
+	struct elf_policy_call_transition *trans;
+	struct elf_policy_stack_frame *down;
 };
 /* OS primitives*/
 extern int elfp_os_change_context(elfp_process_t *tsk,elfp_context_t *context);

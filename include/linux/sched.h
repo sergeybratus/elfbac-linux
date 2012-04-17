@@ -1281,6 +1281,10 @@ struct task_struct {
 #endif
 
 	struct mm_struct *mm, *active_mm;
+#ifdef CONFIG_ELF_POLICY
+	struct mm_struct *elf_policy_mm; /* Used for pagefaulting */
+	struct elf_policy *elf_policy; /* Linked list of ELF policy segments*/
+#endif
 #ifdef CONFIG_COMPAT_BRK
 	unsigned brk_randomized:1;
 #endif
@@ -1574,9 +1578,6 @@ struct task_struct {
 #endif
 #ifdef CONFIG_HAVE_HW_BREAKPOINT
 	atomic_t ptrace_bp_refcnt;
-#endif
-#ifdef CONFIG_ELF_POLICY
-	struct elf_policy *elf_policy; /* Linked list of ELF policy segments*/
 #endif
 };
 

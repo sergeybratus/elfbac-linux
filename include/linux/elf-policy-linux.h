@@ -47,6 +47,9 @@ inline void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy)
 	tsk->elf_policy = policy;
 	atomic_inc(&(policy->refs));
 }
+inline void elfp_policy_get_refcount(struct elf_policy *policy){
+	return atomic_get(&(policy->refs));
+}
 inline size_t elfp_read_policy(uintptr_t off, void *outbuf,size_t size,elfp_process_t *tsk){
 	return size-copy_from_user(outbuf,(void *)off, size);
 }
