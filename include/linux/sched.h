@@ -1284,6 +1284,7 @@ struct task_struct {
 #ifdef CONFIG_ELF_POLICY
 	struct mm_struct *elf_policy_mm; /* Used for pagefaulting */
 	struct elf_policy *elf_policy; /* Linked list of ELF policy segments*/
+	struct elfp_state *elfp_current;
 #endif
 #ifdef CONFIG_COMPAT_BRK
 	unsigned brk_randomized:1;

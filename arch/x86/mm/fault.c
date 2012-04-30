@@ -1005,10 +1005,11 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 
 	tsk = current;
 #ifdef CONFIG_ELF_POLICY
-	mm = tsk->elf_policy_mm;
-#else
-	mm = tsk->mm;
+	if(likely(tsk->elf_policy_mm))
+		mm = tsk->elf_policy_mm;
+	else
 #endif
+		mm = tsk->mm;
 
 	/* Get the faulting address: */
 	address = read_cr2();
@@ -1087,7 +1088,8 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 				return;
 		}
 		else{
-			if(elfp_handle_data_address_fault(address,tsk))
+			if(elfp_handle_data_address_fault(address,tsk,
+					(error_code & PF_WRITE)? ELFP_RW_WRITE : ELFP_RW_READ))
 				return;
 		}
 	}

@@ -3289,8 +3289,14 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	struct mm_struct *mm, *oldmm;
 
 	prepare_task_switch(rq, prev, next);
-
+#ifdef CONFIG_ELF_POLICY
+	if(next->elf_policy_mm)
+		mm = next->elf_policy_mm;
+	else
+		mm = next->mm;
+#else
 	mm = next->mm;
+#endif
 	oldmm = prev->active_mm;
 	/*
 	 * For paravirt, this is coupled with an exit in switch_to to

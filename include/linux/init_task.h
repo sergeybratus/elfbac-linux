@@ -98,6 +98,14 @@ extern struct group_info init_groups;
 #else
 #define INIT_TASK_RCU_BOOST()
 #endif
+#ifdef CONFIG_ELF_POLICY
+#define INIT_TASK_ELF_POLICY						\
+	.elf_policy_mm = NULL,							\
+	.elf_policy = NULL, 							\
+	.elfp_current = NULL
+#else
+#define INIT_TASK_ELF_POLICY
+#endif
 #ifdef CONFIG_TREE_PREEMPT_RCU
 #define INIT_TASK_RCU_TREE_PREEMPT()					\
 	.rcu_blocked_node = NULL,
@@ -124,13 +132,6 @@ extern struct cred init_cred;
 	.perf_event_list = LIST_HEAD_INIT(tsk.perf_event_list),
 #else
 # define INIT_PERF_EVENTS(tsk)
-#endif
-
-#ifdef CONFIG_ELF_POLICY
-# define INIT_POLICY_SEGMENTS(tsk)			\
-	.elf_policy = NULL,			
-#else
-# define INIT_POLICY_SEGMENTS(tsk)
 #endif
 /*
  *  INIT_TASK is used to set up the first task table, touch at
@@ -198,7 +199,7 @@ extern struct cred init_cred;
 	INIT_FTRACE_GRAPH						\
 	INIT_TRACE_RECURSION						\
 	INIT_TASK_RCU_PREEMPT(tsk)					\
-	INIT_POLICY_SEGMENTS(tsk)				\
+	INIT_TASK_ELF_POLICY				\
 }
 
 

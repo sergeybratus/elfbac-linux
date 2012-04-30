@@ -42,6 +42,7 @@ typedef __s64	Elf64_Sxword;
 #define PT_SHLIB   5
 #define PT_PHDR    6
 #define PT_TLS     7               /* Thread local storage segment */
+#define PT_ELFBAC_POLICY  42 /*8 existed on /init on my machine. This number didn't give me problems */
 #define PT_LOOS    0x60000000      /* OS-specific */
 #define PT_HIOS    0x6fffffff      /* OS-specific */
 #define PT_LOPROC  0x70000000
