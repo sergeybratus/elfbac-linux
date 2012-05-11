@@ -7,35 +7,41 @@
 
 #ifndef LINUX_elfp_H
 #define LINUX_elfp_H
- typedef u_int32_t elfp_id_t;
- typedef unsigned int elfp_chunk_header_t;
+ typedef uint32_t elfp_id_t;
+ typedef uint32_t elfp_chunk_header_t;
 #define ELFP_CHUNK_STATE 1
  #define ELFP_CHUNK_CALL 2
  #define ELFP_CHUNK_READWRITE 3
- struct __attribute__ ((__packed__)) elfp_desc_header{
-	 unsigned int chunkcount;
- };
-struct  __attribute__((__packed__)) elfp_desc_state{
+ #pragma pack(push,1)
+ struct elfp_desc_header{
+	 uint32_t chunkcount;
+ } __attribute__ ((__packed__));
+struct   elfp_desc_state{
+  elfp_chunk_header_t chunktype;
   uintptr_t low; /* User space begin pointer */
   uintptr_t high; /* User space end pointer */
   elfp_id_t id;
-};
+}__attribute__((__packed__));
 #define ELFP_RW_READ (1u << 0)
 #define ELFP_RW_WRITE (1u << 1)
 #define ELFP_RW_ALL (ELFP_RW_READ | ELFP_RW_WRITE)
 struct elfp_desc_readwrite{
+	  elfp_chunk_header_t chunktype;
 	uintptr_t low;
 	uintptr_t high;
 	elfp_id_t from;
 	elfp_id_t to;
-	unsigned int type;
+	uint32_t type;
 }__attribute__ ((__packed__));
+
 struct elfp_desc_call{
+	  elfp_chunk_header_t chunktype;
 	elfp_id_t from,to;
-	uintptr_t offset;
-	unsigned short parambytes;
-	unsigned short returnbytes;
+	uintptr_t offset;/*  offset is within the code range of to*/
+	uint16_t parambytes;
+	uint16_t returnbytes;
 }__attribute__ ((__packed__));
+#pragma pack(pop)
 #ifdef __KERNEL__
 struct elfp;
 struct elfp_state;

@@ -111,7 +111,8 @@ static struct elfp_state *elfp_find_state_by_id(struct elf_policy * pol, elfp_id
 	else
 		return NULL;
 }
-int elfp_parse_policy(uintptr_t start,uintptr_t end, elfp_process_t *tsk){
+int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
+	uintptr_t end = start +size;
 	struct elf_policy *pol;
 	struct elfp_desc_header hdr;
 	uintptr_t off = start;
@@ -175,7 +176,10 @@ int elfp_parse_policy(uintptr_t start,uintptr_t end, elfp_process_t *tsk){
 			data->offset = buf.offset;
 			data->parambytes = buf.parambytes;
 			data->returnbytes = buf.returnbytes;
-
+			if(data->offset > data->to->codehigh || data->offset < data->to->codelow){
+				elfp_os_errormsg("ELF call chunk invalid-> Offset not in target state\n");
+				return -EINVAL;
+			}
 			elfp_insert_call_transition(data);
 		}
 		case ELFP_CHUNK_READWRITE:
@@ -212,7 +216,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t end, elfp_process_t *tsk){
 int elfp_destroy_policy(struct elf_policy *policy)
 {
 	if(0 == elfp_policy_get_refcount(policy)){
-		elfp_os_errormsg("elfp_free_policy: Tried to free elf policy that is still in use");
+		elfp_os_errormsg("elfp_free_policy: Tried to free elf policy that is still in use\n");
 		return -EINVAL;
 	}
 	while(policy->states){
