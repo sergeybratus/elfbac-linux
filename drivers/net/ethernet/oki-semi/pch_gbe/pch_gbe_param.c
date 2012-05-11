@@ -18,8 +18,8 @@
  * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
  */
 
-#include <linux/module.h>	/* for __MODULE_STRING */
 #include "pch_gbe.h"
+#include <linux/module.h>	/* for __MODULE_STRING */
 
 #define OPTION_UNSET   -1
 #define OPTION_DISABLED 0
@@ -321,10 +321,10 @@ static void pch_gbe_check_copper_options(struct pch_gbe_adapter *adapter)
 			pr_debug("AutoNeg specified along with Speed or Duplex, AutoNeg parameter ignored\n");
 			hw->phy.autoneg_advertised = opt.def;
 		} else {
-			hw->phy.autoneg_advertised = AutoNeg;
-			pch_gbe_validate_option(
-				(int *)(&hw->phy.autoneg_advertised),
-				&opt, adapter);
+			int tmp = AutoNeg;
+
+			pch_gbe_validate_option(&tmp, &opt, adapter);
+			hw->phy.autoneg_advertised = tmp;
 		}
 	}
 
@@ -495,9 +495,10 @@ void pch_gbe_check_options(struct pch_gbe_adapter *adapter)
 			.arg  = { .l = { .nr = (int)ARRAY_SIZE(fc_list),
 					 .p = fc_list } }
 		};
-		hw->mac.fc = FlowControl;
-		pch_gbe_validate_option((int *)(&hw->mac.fc),
-						&opt, adapter);
+		int tmp = FlowControl;
+
+		pch_gbe_validate_option(&tmp, &opt, adapter);
+		hw->mac.fc = tmp;
 	}
 
 	pch_gbe_check_copper_options(adapter);

@@ -40,9 +40,9 @@
 #include "ttm/ttm_module.h"
 #include "vmwgfx_fence.h"
 
-#define VMWGFX_DRIVER_DATE "20111025"
+#define VMWGFX_DRIVER_DATE "20120209"
 #define VMWGFX_DRIVER_MAJOR 2
-#define VMWGFX_DRIVER_MINOR 3
+#define VMWGFX_DRIVER_MINOR 4
 #define VMWGFX_DRIVER_PATCHLEVEL 0
 #define VMWGFX_FILE_PAGE_OFFSET 0x00100000
 #define VMWGFX_FIFO_STATIC_SIZE (1024*1024)
@@ -62,6 +62,7 @@
 struct vmw_fpriv {
 	struct drm_master *locked_master;
 	struct ttm_object_file *tfile;
+	struct list_head fence_events;
 };
 
 struct vmw_dma_buffer {
@@ -202,6 +203,8 @@ struct vmw_private {
 	uint32_t mmio_size;
 	uint32_t fb_max_width;
 	uint32_t fb_max_height;
+	uint32_t initial_width;
+	uint32_t initial_height;
 	__le32 __iomem *mmio_virt;
 	int mmio_mtrr;
 	uint32_t capabilities;
@@ -390,6 +393,11 @@ extern int vmw_context_check(struct vmw_private *dev_priv,
 			     struct ttm_object_file *tfile,
 			     int id,
 			     struct vmw_resource **p_res);
+extern int vmw_user_lookup_handle(struct vmw_private *dev_priv,
+				  struct ttm_object_file *tfile,
+				  uint32_t handle,
+				  struct vmw_surface **out_surf,
+				  struct vmw_dma_buffer **out_buf);
 extern void vmw_surface_res_free(struct vmw_resource *res);
 extern int vmw_surface_init(struct vmw_private *dev_priv,
 			    struct vmw_surface *srf,
@@ -528,7 +536,8 @@ extern int vmw_execbuf_process(struct drm_file *file_priv,
 			       uint32_t command_size,
 			       uint64_t throttle_us,
 			       struct drm_vmw_fence_rep __user
-			       *user_fence_rep);
+			       *user_fence_rep,
+			       struct vmw_fence_obj **out_fence);
 
 extern void
 vmw_execbuf_release_pinned_bo(struct vmw_private *dev_priv,

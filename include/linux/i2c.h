@@ -17,7 +17,8 @@
 
     You should have received a copy of the GNU General Public License
     along with this program; if not, write to the Free Software
-    Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.		     */
+    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston,
+    MA 02110-1301 USA.							     */
 /* ------------------------------------------------------------------------- */
 
 /* With some changes from Kyösti Mälkki <kmalkki@cc.hut.fi> and
@@ -432,9 +433,6 @@ void i2c_unlock_adapter(struct i2c_adapter *);
 /* Internal numbers to terminate lists */
 #define I2C_CLIENT_END		0xfffeU
 
-/* The numbers to use to set I2C bus address */
-#define ANY_I2C_BUS		0xffff
-
 /* Construct an I2C_CLIENT_END-terminated array of i2c addresses */
 #define I2C_ADDRS(addr, addrs...) \
 	((const unsigned short []){ addr, ## addrs, I2C_CLIENT_END })
@@ -485,6 +483,19 @@ static inline int i2c_adapter_id(struct i2c_adapter *adap)
 {
 	return adap->nr;
 }
+
+/**
+ * module_i2c_driver() - Helper macro for registering a I2C driver
+ * @__i2c_driver: i2c_driver struct
+ *
+ * Helper macro for I2C drivers which do not do anything special in module
+ * init/exit. This eliminates a lot of boilerplate. Each module may only
+ * use this macro once, and calling it replaces module_init() and module_exit()
+ */
+#define module_i2c_driver(__i2c_driver) \
+	module_driver(__i2c_driver, i2c_add_driver, \
+			i2c_del_driver)
+
 #endif /* I2C */
 #endif /* __KERNEL__ */
 

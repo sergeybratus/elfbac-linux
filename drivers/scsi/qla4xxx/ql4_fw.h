@@ -12,6 +12,7 @@
 #define MAX_PRST_DEV_DB_ENTRIES		64
 #define MIN_DISC_DEV_DB_ENTRY		MAX_PRST_DEV_DB_ENTRIES
 #define MAX_DEV_DB_ENTRIES		512
+#define MAX_DEV_DB_ENTRIES_40XX		256
 
 /*************************************************************************
  *
@@ -330,6 +331,10 @@ struct qla_flt_region {
 /*  Mailbox command definitions */
 #define MBOX_CMD_ABOUT_FW			0x0009
 #define MBOX_CMD_PING				0x000B
+#define PING_IPV6_PROTOCOL_ENABLE		0x1
+#define PING_IPV6_LINKLOCAL_ADDR		0x4
+#define PING_IPV6_ADDR0				0x8
+#define PING_IPV6_ADDR1				0xC
 #define MBOX_CMD_ENABLE_INTRS			0x0010
 #define INTR_DISABLE				0
 #define INTR_ENABLE				1
@@ -395,6 +400,10 @@ struct qla_flt_region {
 #define FW_ADDSTATE_DHCPv4_LEASE_EXPIRED	0x0008
 #define FW_ADDSTATE_LINK_UP			0x0010
 #define FW_ADDSTATE_ISNS_SVC_ENABLED		0x0020
+#define FW_ADDSTATE_LINK_SPEED_10MBPS		0x0100
+#define FW_ADDSTATE_LINK_SPEED_100MBPS		0x0200
+#define FW_ADDSTATE_LINK_SPEED_1GBPS		0x0400
+#define FW_ADDSTATE_LINK_SPEED_10GBPS		0x0800
 
 #define MBOX_CMD_GET_DATABASE_ENTRY_DEFAULTS	0x006B
 #define IPV6_DEFAULT_DDB_ENTRY			0x0001
@@ -604,6 +613,13 @@ struct addr_ctrl_blk {
 	uint8_t res14[140];	/* 274-2FF */
 };
 
+#define IP_ADDR_COUNT	4 /* Total 4 IP address supported in one interface
+			   * One IPv4, one IPv6 link local and 2 IPv6
+			   */
+
+#define IP_STATE_MASK	0x0F000000
+#define IP_STATE_SHIFT	24
+
 struct init_fw_ctrl_blk {
 	struct addr_ctrl_blk pri;
 /*	struct addr_ctrl_blk sec;*/
@@ -744,7 +760,7 @@ struct dev_db_entry {
 	uint8_t res4[0x36];	/* 8A-BF */
 	uint8_t iscsi_name[0xE0];	/* C0-19F : xxzzy Make this a
 					 * pointer to a string so we
-					 * don't have to reserve soooo
+					 * don't have to reserve so
 					 * much RAM */
 	uint8_t link_local_ipv6_addr[0x10]; /* 1A0-1AF */
 	uint8_t res5[0x10];	/* 1B0-1BF */
@@ -910,6 +926,8 @@ struct qla4_header {
 #define ET_CMND_T3		 0x19
 #define ET_PASSTHRU0		 0x3A
 #define ET_PASSTHRU_STATUS	 0x3C
+#define ET_MBOX_CMD		0x38
+#define ET_MBOX_STATUS		0x39
 
 	uint8_t entryStatus;
 	uint8_t systemDefined;
@@ -1108,6 +1126,20 @@ struct passthru_status {
 	uint8_t res2[12];	/* 20-2B */
 	uint32_t inResidual;	/* 2C-2F */
 	uint8_t res4[16];	/* 30-3F */
+};
+
+struct mbox_cmd_iocb {
+	struct qla4_header hdr;	/* 00-03 */
+	uint32_t handle;	/* 04-07 */
+	uint32_t in_mbox[8];	/* 08-25 */
+	uint32_t res1[6];	/* 26-3F */
+};
+
+struct mbox_status_iocb {
+	struct qla4_header hdr;	/* 00-03 */
+	uint32_t handle;	/* 04-07 */
+	uint32_t out_mbox[8];	/* 08-25 */
+	uint32_t res1[6];	/* 26-3F */
 };
 
 /*

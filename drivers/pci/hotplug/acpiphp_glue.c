@@ -132,6 +132,18 @@ register_slot(acpi_handle handle, u32 lvl, void *context, void **rv)
 	if (!acpi_pci_check_ejectable(pbus, handle) && !is_dock_device(handle))
 		return AE_OK;
 
+	pdev = pbus->self;
+	if (pdev && pci_is_pcie(pdev)) {
+		tmp = acpi_find_root_bridge_handle(pdev);
+		if (tmp) {
+			struct acpi_pci_root *root = acpi_pci_find_root(tmp);
+
+			if (root && (root->osc_control_set &
+					OSC_PCI_EXPRESS_NATIVE_HP_CONTROL))
+				return AE_OK;
+		}
+	}
+
 	acpi_evaluate_integer(handle, "_ADR", NULL, &adr);
 	device = (adr >> 16) & 0xffff;
 	function = adr & 0xffff;
@@ -213,7 +225,6 @@ register_slot(acpi_handle handle, u32 lvl, void *context, void **rv)
 
 	pdev = pci_get_slot(pbus, PCI_DEVFN(device, function));
 	if (pdev) {
-		pdev->current_state = PCI_D0;
 		slot->flags |= (SLOT_ENABLED | SLOT_POWEREDON);
 		pci_dev_put(pdev);
 	}
@@ -789,20 +800,10 @@ static int __ref enable_device(struct acpiphp_slot *slot)
 	if (slot->flags & SLOT_ENABLED)
 		goto err_exit;
 
-	/* sanity check: dev should be NULL when hot-plugged in */
-	dev = pci_get_slot(bus, PCI_DEVFN(slot->device, 0));
-	if (dev) {
-		/* This case shouldn't happen */
-		err("pci_dev structure already exists.\n");
-		pci_dev_put(dev);
-		retval = -1;
-		goto err_exit;
-	}
-
 	num = pci_scan_slot(bus, PCI_DEVFN(slot->device, 0));
 	if (num == 0) {
-		err("No new device found\n");
-		retval = -1;
+		/* Maybe only part of funcs are added. */
+		dbg("No new device found\n");
 		goto err_exit;
 	}
 
@@ -837,11 +838,16 @@ static int __ref enable_device(struct acpiphp_slot *slot)
 
 	pci_bus_add_devices(bus);
 
+	slot->flags |= SLOT_ENABLED;
 	list_for_each_entry(func, &slot->funcs, sibling) {
 		dev = pci_get_slot(bus, PCI_DEVFN(slot->device,
 						  func->function));
-		if (!dev)
+		if (!dev) {
+			/* Do not set SLOT_ENABLED flag if some funcs
+			   are not added. */
+			slot->flags &= (~SLOT_ENABLED);
 			continue;
+		}
 
 		if (dev->hdr_type != PCI_HEADER_TYPE_BRIDGE &&
 		    dev->hdr_type != PCI_HEADER_TYPE_CARDBUS) {
@@ -856,7 +862,6 @@ static int __ref enable_device(struct acpiphp_slot *slot)
 		pci_dev_put(dev);
 	}
 
-	slot->flags |= SLOT_ENABLED;
 
  err_exit:
 	return retval;
@@ -881,9 +886,12 @@ static int disable_device(struct acpiphp_slot *slot)
 {
 	struct acpiphp_func *func;
 	struct pci_dev *pdev;
+	struct pci_bus *bus = slot->bridge->pci_bus;
 
-	/* is this slot already disabled? */
-	if (!(slot->flags & SLOT_ENABLED))
+	/* The slot will be enabled when func 0 is added, so check
+	   func 0 before disable the slot. */
+	pdev = pci_get_slot(bus, PCI_DEVFN(slot->device, 0));
+	if (!pdev)
 		goto err_exit;
 
 	list_for_each_entry(func, &slot->funcs, sibling) {
@@ -902,7 +910,7 @@ static int disable_device(struct acpiphp_slot *slot)
 				disable_bridges(pdev->subordinate);
 				pci_disable_device(pdev);
 			}
-			pci_remove_bus_device(pdev);
+			__pci_remove_bus_device(pdev);
 			pci_dev_put(pdev);
 		}
 	}
@@ -1059,7 +1067,7 @@ static void acpiphp_sanitize_bus(struct pci_bus *bus)
 					res->end) {
 				/* Could not assign a required resources
 				 * for this device, remove it */
-				pci_remove_bus_device(dev);
+				pci_stop_and_remove_bus_device(dev);
 				break;
 			}
 		}
@@ -1378,11 +1386,13 @@ find_root_bridges(acpi_handle handle, u32 lvl, void *context, void **rv)
 {
 	int *count = (int *)context;
 
-	if (acpi_is_root_bridge(handle)) {
-		acpi_install_notify_handler(handle, ACPI_SYSTEM_NOTIFY,
-				handle_hotplug_event_bridge, NULL);
-			(*count)++;
-	}
+	if (!acpi_is_root_bridge(handle))
+		return AE_OK;
+
+	(*count)++;
+	acpi_install_notify_handler(handle, ACPI_SYSTEM_NOTIFY,
+				    handle_hotplug_event_bridge, NULL);
+
 	return AE_OK ;
 }
 

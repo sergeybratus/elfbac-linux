@@ -26,28 +26,22 @@
 #ifndef _EXYNOS_DRM_BUF_H_
 #define _EXYNOS_DRM_BUF_H_
 
-/*
- * exynos drm buffer entry structure.
- *
- * @paddr: physical address of allocated memory.
- * @vaddr: kernel virtual address of allocated memory.
- * @size: size of allocated memory.
- */
-struct exynos_drm_buf_entry {
-	dma_addr_t paddr;
-	void __iomem *vaddr;
-	unsigned int size;
-};
+/* create and initialize buffer object. */
+struct exynos_drm_gem_buf *exynos_drm_init_buf(struct drm_device *dev,
+						unsigned int size);
 
-/* allocate physical memory. */
-struct exynos_drm_buf_entry *exynos_drm_buf_create(struct drm_device *dev,
-		unsigned int size);
+/* destroy buffer object. */
+void exynos_drm_fini_buf(struct drm_device *dev,
+				struct exynos_drm_gem_buf *buffer);
 
-/* get physical memory information of a drm framebuffer. */
-struct exynos_drm_buf_entry *exynos_drm_fb_get_buf(struct drm_framebuffer *fb);
+/* allocate physical memory region and setup sgt and pages. */
+int exynos_drm_alloc_buf(struct drm_device *dev,
+				struct exynos_drm_gem_buf *buf,
+				unsigned int flags);
 
-/* remove allocated physical memory. */
-void exynos_drm_buf_destroy(struct drm_device *dev,
-		struct exynos_drm_buf_entry *entry);
+/* release physical memory region, sgt and pages. */
+void exynos_drm_free_buf(struct drm_device *dev,
+				unsigned int flags,
+				struct exynos_drm_gem_buf *buffer);
 
 #endif

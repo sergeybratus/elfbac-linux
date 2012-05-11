@@ -888,7 +888,8 @@ struct ct6_dsd {
 };
 
 #define MBC_TOGGLE_INTERRUPT	0x10
-#define MBC_SET_LED_CONFIG	0x125
+#define MBC_SET_LED_CONFIG	0x125	/* FCoE specific LED control */
+#define MBC_GET_LED_CONFIG	0x126	/* FCoE specific LED control */
 
 /* Flash  offset */
 #define FLT_REG_BOOTLOAD_82XX	0x72
@@ -1173,4 +1174,8 @@ struct qla82xx_md_entry_queue {
 
 static const int MD_MIU_TEST_AGT_RDDATA[] = { 0x410000A8, 0x410000AC,
 	0x410000B8, 0x410000BC };
+
+#define CRB_NIU_XG_PAUSE_CTL_P0        0x1
+#define CRB_NIU_XG_PAUSE_CTL_P1        0x8
+
 #endif

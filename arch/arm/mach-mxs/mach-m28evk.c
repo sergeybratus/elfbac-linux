@@ -247,18 +247,15 @@ static int __init m28evk_fec_get_mac(void)
 	u32 val;
 	const u32 *ocotp = mxs_get_ocotp();
 
-	if (!ocotp) {
-		pr_err("%s: timeout when reading fec mac from OCOTP\n",
-			__func__);
+	if (!ocotp)
 		return -ETIMEDOUT;
-	}
 
 	/*
 	 * OCOTP only stores the last 4 octets for each mac address,
 	 * so hard-code DENX OUI (C0:E5:4E) here.
 	 */
 	for (i = 0; i < 2; i++) {
-		val = ocotp[i * 4];
+		val = ocotp[i];
 		mx28_fec_pdata[i].mac[0] = 0xC0;
 		mx28_fec_pdata[i].mac[1] = 0xE5;
 		mx28_fec_pdata[i].mac[2] = 0x4E;
@@ -361,6 +358,7 @@ static struct sys_timer m28evk_timer = {
 MACHINE_START(M28EVK, "DENX M28 EVK")
 	.map_io		= mx28_map_io,
 	.init_irq	= mx28_init_irq,
-	.init_machine	= m28evk_init,
 	.timer		= &m28evk_timer,
+	.init_machine	= m28evk_init,
+	.restart	= mxs_restart,
 MACHINE_END

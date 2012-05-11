@@ -359,10 +359,7 @@ xfs_quiesce_data(
 {
 	int			error, error2 = 0;
 
-	xfs_qm_sync(mp, SYNC_TRYLOCK);
-	xfs_qm_sync(mp, SYNC_WAIT);
-
-	/* force out the newly dirtied log buffers */
+	/* force out the log */
 	xfs_log_force(mp, XFS_LOG_SYNC);
 
 	/* write superblock and hoover up shutdown errors */
@@ -470,7 +467,6 @@ xfs_sync_worker(
 			error = xfs_fs_log_dummy(mp);
 		else
 			xfs_log_force(mp, 0);
-		error = xfs_qm_sync(mp, SYNC_TRYLOCK);
 
 		/* start pushing all the metadata that is currently dirty */
 		xfs_ail_push_all(mp->m_ail);
@@ -675,14 +671,13 @@ xfs_reclaim_inode_grab(
 		return 1;
 
 	/*
-	 * do some unlocked checks first to avoid unnecessary lock traffic.
-	 * The first is a flush lock check, the second is a already in reclaim
-	 * check. Only do these checks if we are not going to block on locks.
+	 * If we are asked for non-blocking operation, do unlocked checks to
+	 * see if the inode already is being flushed or in reclaim to avoid
+	 * lock traffic.
 	 */
 	if ((flags & SYNC_TRYLOCK) &&
-	    (!ip->i_flush.done || __xfs_iflags_test(ip, XFS_IRECLAIM))) {
+	    __xfs_iflags_test(ip, XFS_IFLOCK | XFS_IRECLAIM))
 		return 1;
-	}
 
 	/*
 	 * The radix tree lock here protects a thread in xfs_iget from racing
@@ -770,6 +765,17 @@ restart:
 	if (!xfs_iflock_nowait(ip)) {
 		if (!(sync_mode & SYNC_WAIT))
 			goto out;
+
+		/*
+		 * If we only have a single dirty inode in a cluster there is
+		 * a fair chance that the AIL push may have pushed it into
+		 * the buffer, but xfsbufd won't touch it until 30 seconds
+		 * from now, and thus we will lock up here.
+		 *
+		 * Promote the inode buffer to the front of the delwri list
+		 * and wake up xfsbufd now.
+		 */
+		xfs_promote_inode(ip);
 		xfs_iflock(ip);
 	}
 
@@ -871,17 +877,15 @@ reclaim:
 	 * can reference the inodes in the cache without taking references.
 	 *
 	 * We make that OK here by ensuring that we wait until the inode is
-	 * unlocked after the lookup before we go ahead and free it.  We get
-	 * both the ilock and the iolock because the code may need to drop the
-	 * ilock one but will still hold the iolock.
+	 * unlocked after the lookup before we go ahead and free it.
 	 */
-	xfs_ilock(ip, XFS_ILOCK_EXCL | XFS_IOLOCK_EXCL);
+	xfs_ilock(ip, XFS_ILOCK_EXCL);
 	xfs_qm_dqdetach(ip);
-	xfs_iunlock(ip, XFS_ILOCK_EXCL | XFS_IOLOCK_EXCL);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
 
 	xfs_inode_free(ip);
-	return error;
 
+	return error;
 }
 
 /*

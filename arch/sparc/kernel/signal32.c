@@ -28,6 +28,7 @@
 #include <asm/fpumacro.h>
 #include <asm/visasm.h>
 #include <asm/compat_signal.h>
+#include <asm/switch_to.h>
 
 #include "sigutil.h"
 
@@ -776,7 +777,6 @@ static inline int handle_signal32(unsigned long signr, struct k_sigaction *ka,
 				  siginfo_t *info,
 				  sigset_t *oldset, struct pt_regs *regs)
 {
-	sigset_t blocked;
 	int err;
 
 	if (ka->sa.sa_flags & SA_SIGINFO)
@@ -787,11 +787,7 @@ static inline int handle_signal32(unsigned long signr, struct k_sigaction *ka,
 	if (err)
 		return err;
 
-	sigorsets(&blocked, &current->blocked, &ka->sa.sa_mask);
-	if (!(ka->sa.sa_flags & SA_NOMASK))
-		sigaddset(&blocked, signr);
-	set_current_blocked(&blocked);
-
+	block_sigmask(ka, signr);
 	tracehook_signal_handler(signr, info, ka, regs, 0);
 
 	return 0;
@@ -822,21 +818,23 @@ static inline void syscall_restart32(unsigned long orig_i0, struct pt_regs *regs
  * want to handle. Thus you cannot kill init even with a SIGKILL even by
  * mistake.
  */
-void do_signal32(sigset_t *oldset, struct pt_regs * regs,
-		 int restart_syscall, unsigned long orig_i0)
+void do_signal32(sigset_t *oldset, struct pt_regs * regs)
 {
 	struct k_sigaction ka;
+	unsigned long orig_i0;
+	int restart_syscall;
 	siginfo_t info;
 	int signr;
 	
 	signr = get_signal_to_deliver(&info, &ka, regs, NULL);
 
-	/* If the debugger messes with the program counter, it clears
-	 * the "in syscall" bit, directing us to not perform a syscall
-	 * restart.
-	 */
-	if (restart_syscall && !pt_regs_is_syscall(regs))
-		restart_syscall = 0;
+	restart_syscall = 0;
+	orig_i0 = 0;
+	if (pt_regs_is_syscall(regs) &&
+	    (regs->tstate & (TSTATE_XCARRY | TSTATE_ICARRY))) {
+		restart_syscall = 1;
+		orig_i0 = regs->u_regs[UREG_G6];
+	}
 
 	if (signr > 0) {
 		if (restart_syscall)

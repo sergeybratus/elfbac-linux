@@ -17,6 +17,7 @@
 #include <linux/init.h>
 #include <linux/slab.h>
 #include <linux/cpufreq.h>
+#include <linux/device.h>
 #include <linux/list.h>
 #include <linux/rculist.h>
 #include <linux/rcupdate.h>
@@ -669,7 +670,7 @@ struct srcu_notifier_head *opp_get_notifier(struct device *dev)
 	struct device_opp *dev_opp = find_device_opp(dev);
 
 	if (IS_ERR(dev_opp))
-		return ERR_PTR(PTR_ERR(dev_opp)); /* matching type */
+		return ERR_CAST(dev_opp); /* matching type */
 
 	return &dev_opp->head;
 }

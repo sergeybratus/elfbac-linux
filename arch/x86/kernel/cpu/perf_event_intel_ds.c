@@ -3,6 +3,7 @@
 #include <linux/slab.h>
 
 #include <asm/perf_event.h>
+#include <asm/insn.h>
 
 #include "perf_event.h"
 
@@ -439,10 +440,6 @@ void intel_pmu_pebs_enable(struct perf_event *event)
 	hwc->config &= ~ARCH_PERFMON_EVENTSEL_INT;
 
 	cpuc->pebs_enabled |= 1ULL << hwc->idx;
-	WARN_ON_ONCE(cpuc->enabled);
-
-	if (x86_pmu.intel_cap.pebs_trap && event->attr.precise_ip > 1)
-		intel_pmu_lbr_enable(event);
 }
 
 void intel_pmu_pebs_disable(struct perf_event *event)
@@ -455,9 +452,6 @@ void intel_pmu_pebs_disable(struct perf_event *event)
 		wrmsrl(MSR_IA32_PEBS_ENABLE, cpuc->pebs_enabled);
 
 	hwc->config |= ARCH_PERFMON_EVENTSEL_INT;
-
-	if (x86_pmu.intel_cap.pebs_trap && event->attr.precise_ip > 1)
-		intel_pmu_lbr_disable(event);
 }
 
 void intel_pmu_pebs_enable_all(void)
@@ -476,23 +470,13 @@ void intel_pmu_pebs_disable_all(void)
 		wrmsrl(MSR_IA32_PEBS_ENABLE, 0);
 }
 
-#include <asm/insn.h>
-
-static inline bool kernel_ip(unsigned long ip)
-{
-#ifdef CONFIG_X86_32
-	return ip > PAGE_OFFSET;
-#else
-	return (long)ip < 0;
-#endif
-}
-
 static int intel_pmu_pebs_fixup_ip(struct pt_regs *regs)
 {
 	struct cpu_hw_events *cpuc = &__get_cpu_var(cpu_hw_events);
 	unsigned long from = cpuc->lbr_entries[0].from;
 	unsigned long old_to, to = cpuc->lbr_entries[0].to;
 	unsigned long ip = regs->ip;
+	int is_64bit = 0;
 
 	/*
 	 * We don't need to fixup if the PEBS assist is fault like
@@ -544,7 +528,10 @@ static int intel_pmu_pebs_fixup_ip(struct pt_regs *regs)
 		} else
 			kaddr = (void *)to;
 
-		kernel_insn_init(&insn, kaddr);
+#ifdef CONFIG_X86_64
+		is_64bit = kernel_ip(to) || !test_thread_flag(TIF_IA32);
+#endif
+		insn_init(&insn, kaddr, is_64bit);
 		insn_get_length(&insn);
 		to += insn.length;
 	} while (to < ip);
@@ -569,6 +556,7 @@ static void __intel_pmu_pebs_event(struct perf_event *event,
 	 * both formats and we don't use the other fields in this
 	 * routine.
 	 */
+	struct cpu_hw_events *cpuc = &__get_cpu_var(cpu_hw_events);
 	struct pebs_record_core *pebs = __pebs;
 	struct perf_sample_data data;
 	struct pt_regs regs;
@@ -598,6 +586,9 @@ static void __intel_pmu_pebs_event(struct perf_event *event,
 		regs.flags |= PERF_EFLAGS_EXACT;
 	else
 		regs.flags &= ~PERF_EFLAGS_EXACT;
+
+	if (has_branch_stack(event))
+		data.br_stack = &cpuc->lbr_stack;
 
 	if (perf_event_overflow(event, &data, &regs))
 		x86_pmu_stop(event, 0);

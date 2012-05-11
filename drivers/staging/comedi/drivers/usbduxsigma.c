@@ -1,4 +1,4 @@
-#define DRIVER_VERSION "v0.5"
+#define DRIVER_VERSION "v0.6"
 #define DRIVER_AUTHOR "Bernd Porr, BerndPorr@f2s.com"
 #define DRIVER_DESC "Stirling/ITL USB-DUX SIGMA -- Bernd.Porr@f2s.com"
 /*
@@ -25,7 +25,7 @@ Driver: usbduxsigma
 Description: University of Stirling USB DAQ & INCITE Technology Limited
 Devices: [ITL] USB-DUX (usbduxsigma.o)
 Author: Bernd Porr <BerndPorr@f2s.com>
-Updated: 21 Jul 2011
+Updated: 8 Nov 2011
 Status: testing
 */
 /*
@@ -39,11 +39,12 @@ Status: testing
  *
  *
  * Revision history:
- *   0.1: inital version
+ *   0.1: initial version
  *   0.2: all basic functions implemented, digital I/O only for one port
  *   0.3: proper vendor ID and driver name
  *   0.4: fixed D/A voltage range
  *   0.5: various bug fixes, health check at startup
+ *   0.6: corrected wrong input range
  */
 
 /* generates loads of debug info */
@@ -175,7 +176,7 @@ Status: testing
 /* comedi constants */
 static const struct comedi_lrange range_usbdux_ai_range = { 1, {
 								BIP_RANGE
-								(2.65)
+								(2.65/2.0)
 								}
 };
 
@@ -234,16 +235,16 @@ struct usbduxsub {
 	short int ao_cmd_running;
 	/* pwm is running */
 	short int pwm_cmd_running;
-	/* continous aquisition */
-	short int ai_continous;
-	short int ao_continous;
+	/* continuous acquisition */
+	short int ai_continuous;
+	short int ao_continuous;
 	/* number of samples to acquire */
 	int ai_sample_count;
 	int ao_sample_count;
 	/* time between samples in units of the timer */
 	unsigned int ai_timer;
 	unsigned int ao_timer;
-	/* counter between aquisitions */
+	/* counter between acquisitions */
 	unsigned int ai_counter;
 	unsigned int ao_counter;
 	/* interval in frames/uframes */
@@ -454,8 +455,8 @@ static void usbduxsub_ai_IsocIrq(struct urb *urb)
 	this_usbduxsub->ai_counter = this_usbduxsub->ai_timer;
 
 	/* test, if we transmit only a fixed number of samples */
-	if (!(this_usbduxsub->ai_continous)) {
-		/* not continous, fixed number of samples */
+	if (!(this_usbduxsub->ai_continuous)) {
+		/* not continuous, fixed number of samples */
 		this_usbduxsub->ai_sample_count--;
 		/* all samples received? */
 		if (this_usbduxsub->ai_sample_count < 0) {
@@ -606,8 +607,8 @@ static void usbduxsub_ao_IsocIrq(struct urb *urb)
 		/* timer zero */
 		this_usbduxsub->ao_counter = this_usbduxsub->ao_timer;
 
-		/* handle non continous aquisition */
-		if (!(this_usbduxsub->ao_continous)) {
+		/* handle non continuous acquisition */
+		if (!(this_usbduxsub->ao_continuous)) {
 			/* fixed number of samples */
 			this_usbduxsub->ao_sample_count--;
 			if (this_usbduxsub->ao_sample_count < 0) {
@@ -924,7 +925,7 @@ static int usbdux_ai_cmdtest(struct comedi_device *dev,
 	if (!cmd->scan_begin_src || tmp != cmd->scan_begin_src)
 		err++;
 
-	/* scanning is continous */
+	/* scanning is continuous */
 	tmp = cmd->convert_src;
 	cmd->convert_src &= TRIG_NOW;
 	if (!cmd->convert_src || tmp != cmd->convert_src)
@@ -1192,7 +1193,7 @@ static int usbdux_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 		up(&this_usbduxsub->sem);
 		return -EBUSY;
 	}
-	/* set current channel of the running aquisition to zero */
+	/* set current channel of the running acquisition to zero */
 	s->async->cur_chan = 0;
 
 	/* first the number of channels per time step */
@@ -1260,10 +1261,10 @@ static int usbdux_ai_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 	if (cmd->stop_src == TRIG_COUNT) {
 		/* data arrives as one packet */
 		this_usbduxsub->ai_sample_count = cmd->stop_arg;
-		this_usbduxsub->ai_continous = 0;
+		this_usbduxsub->ai_continuous = 0;
 	} else {
-		/* continous aquisition */
-		this_usbduxsub->ai_continous = 1;
+		/* continuous acquisition */
+		this_usbduxsub->ai_continuous = 1;
 		this_usbduxsub->ai_sample_count = 0;
 	}
 
@@ -1523,15 +1524,17 @@ static int usbdux_ao_inttrig(struct comedi_device *dev,
 		return -EFAULT;
 
 	down(&this_usbduxsub->sem);
+
 	if (!(this_usbduxsub->probed)) {
-		up(&this_usbduxsub->sem);
-		return -ENODEV;
+		ret = -ENODEV;
+		goto out;
 	}
 	if (trignum != 0) {
 		dev_err(&this_usbduxsub->interface->dev,
 			"comedi%d: usbdux_ao_inttrig: invalid trignum\n",
 			dev->minor);
-		return -EINVAL;
+		ret = -EINVAL;
+		goto out;
 	}
 	if (!(this_usbduxsub->ao_cmd_running)) {
 		this_usbduxsub->ao_cmd_running = 1;
@@ -1541,8 +1544,7 @@ static int usbdux_ao_inttrig(struct comedi_device *dev,
 				"comedi%d: usbdux_ao_inttrig: submitURB: "
 				"err=%d\n", dev->minor, ret);
 			this_usbduxsub->ao_cmd_running = 0;
-			up(&this_usbduxsub->sem);
-			return ret;
+			goto out;
 		}
 		s->async->inttrig = NULL;
 	} else {
@@ -1550,8 +1552,10 @@ static int usbdux_ao_inttrig(struct comedi_device *dev,
 			"comedi%d: ao_inttrig but acqu is already running.\n",
 			dev->minor);
 	}
+	ret = 1;
+out:
 	up(&this_usbduxsub->sem);
-	return 1;
+	return ret;
 }
 
 static int usbdux_ao_cmdtest(struct comedi_device *dev,
@@ -1582,7 +1586,7 @@ static int usbdux_ao_cmdtest(struct comedi_device *dev,
 	/* just now we scan also in the high speed mode every frame */
 	/* this is due to ehci driver limitations */
 	if (0) {		/* (this_usbduxsub->high_speed) */
-		/* start immidiately a new scan */
+		/* start immediately a new scan */
 		/* the sampling rate is set by the coversion rate */
 		cmd->scan_begin_src &= TRIG_FOLLOW;
 	} else {
@@ -1592,7 +1596,7 @@ static int usbdux_ao_cmdtest(struct comedi_device *dev,
 	if (!cmd->scan_begin_src || tmp != cmd->scan_begin_src)
 		err++;
 
-	/* scanning is continous */
+	/* scanning is continuous */
 	tmp = cmd->convert_src;
 
 	/* all conversion events happen simultaneously */
@@ -1706,7 +1710,7 @@ static int usbdux_ao_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 	dev_dbg(&this_usbduxsub->interface->dev,
 		"comedi%d: %s\n", dev->minor, __func__);
 
-	/* set current channel of the running aquisition to zero */
+	/* set current channel of the running acquisition to zero */
 	s->async->cur_chan = 0;
 	for (i = 0; i < cmd->chanlist_len; ++i) {
 		chan = CR_CHAN(cmd->chanlist[i]);
@@ -1755,7 +1759,7 @@ static int usbdux_ao_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 	this_usbduxsub->ao_counter = this_usbduxsub->ao_timer;
 
 	if (cmd->stop_src == TRIG_COUNT) {
-		/* not continous */
+		/* not continuous */
 		/* counter */
 		/* high speed also scans everything at once */
 		if (0) {	/* (this_usbduxsub->high_speed) */
@@ -1767,10 +1771,10 @@ static int usbdux_ao_cmd(struct comedi_device *dev, struct comedi_subdevice *s)
 			/* data arrives as one packet */
 			this_usbduxsub->ao_sample_count = cmd->stop_arg;
 		}
-		this_usbduxsub->ao_continous = 0;
+		this_usbduxsub->ao_continuous = 0;
 	} else {
-		/* continous aquisition */
-		this_usbduxsub->ao_continous = 1;
+		/* continuous acquisition */
+		this_usbduxsub->ao_continuous = 1;
 		this_usbduxsub->ao_sample_count = 0;
 	}
 
@@ -2688,6 +2692,7 @@ static int usbduxsigma_attach(struct comedi_device *dev,
 	if (ret < 0) {
 		dev_err(&udev->interface->dev,
 			"comedi%d: no space for subdev\n", dev->minor);
+		up(&udev->sem);
 		up(&start_stop_sem);
 		return ret;
 	}

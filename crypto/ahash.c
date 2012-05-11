@@ -46,7 +46,7 @@ static int hash_walk_next(struct crypto_hash_walk *walk)
 	unsigned int nbytes = min(walk->entrylen,
 				  ((unsigned int)(PAGE_SIZE)) - offset);
 
-	walk->data = crypto_kmap(walk->pg, 0);
+	walk->data = kmap_atomic(walk->pg);
 	walk->data += offset;
 
 	if (offset & alignmask) {
@@ -93,7 +93,7 @@ int crypto_hash_walk_done(struct crypto_hash_walk *walk, int err)
 		return nbytes;
 	}
 
-	crypto_kunmap(walk->data, 0);
+	kunmap_atomic(walk->data);
 	crypto_yield(walk->flags);
 
 	if (err)
@@ -399,6 +399,7 @@ static unsigned int crypto_ahash_extsize(struct crypto_alg *alg)
 	return sizeof(struct crypto_shash *);
 }
 
+#ifdef CONFIG_NET
 static int crypto_ahash_report(struct sk_buff *skb, struct crypto_alg *alg)
 {
 	struct crypto_report_hash rhash;
@@ -416,6 +417,12 @@ static int crypto_ahash_report(struct sk_buff *skb, struct crypto_alg *alg)
 nla_put_failure:
 	return -EMSGSIZE;
 }
+#else
+static int crypto_ahash_report(struct sk_buff *skb, struct crypto_alg *alg)
+{
+	return -ENOSYS;
+}
+#endif
 
 static void crypto_ahash_show(struct seq_file *m, struct crypto_alg *alg)
 	__attribute__ ((unused));

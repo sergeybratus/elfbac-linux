@@ -43,7 +43,6 @@
 
 #include <asm/byteorder.h>
 #include <asm/io.h>
-#include <asm/system.h>
 #include <asm/unaligned.h>
 #include <asm/dma.h>
 
@@ -659,6 +658,7 @@ static int fsl_ep_disable(struct usb_ep *_ep)
 	nuke(ep, -ESHUTDOWN);
 
 	ep->desc = NULL;
+	ep->ep.desc = NULL;
 	ep->stopped = 1;
 	spin_unlock_irqrestore(&udc->lock, flags);
 
@@ -696,12 +696,31 @@ static void fsl_free_request(struct usb_ep *_ep, struct usb_request *_req)
 		kfree(req);
 }
 
-/*-------------------------------------------------------------------------*/
+/* Actually add a dTD chain to an empty dQH and let go */
+static void fsl_prime_ep(struct fsl_ep *ep, struct ep_td_struct *td)
+{
+	struct ep_queue_head *qh = get_qh_by_ep(ep);
+
+	/* Write dQH next pointer and terminate bit to 0 */
+	qh->next_dtd_ptr = cpu_to_hc32(td->td_dma
+			& EP_QUEUE_HEAD_NEXT_POINTER_MASK);
+
+	/* Clear active and halt bit */
+	qh->size_ioc_int_sts &= cpu_to_hc32(~(EP_QUEUE_HEAD_STATUS_ACTIVE
+					| EP_QUEUE_HEAD_STATUS_HALT));
+
+	/* Ensure that updates to the QH will occur before priming. */
+	wmb();
+
+	/* Prime endpoint by writing correct bit to ENDPTPRIME */
+	fsl_writel(ep_is_in(ep) ? (1 << (ep_index(ep) + 16))
+			: (1 << (ep_index(ep))), &dr_regs->endpointprime);
+}
+
+/* Add dTD chain to the dQH of an EP */
 static void fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
 {
-	int i = ep_index(ep) * 2 + ep_is_in(ep);
 	u32 temp, bitmask, tmp_stat;
-	struct ep_queue_head *dQH = &ep->udc->ep_qh[i];
 
 	/* VDBG("QH addr Register 0x%8x", dr_regs->endpointlistaddr);
 	VDBG("ep_qh[%d] addr is 0x%8x", i, (u32)&(ep->udc->ep_qh[i])); */
@@ -719,7 +738,7 @@ static void fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
 			cpu_to_hc32(req->head->td_dma & DTD_ADDR_MASK);
 		/* Read prime bit, if 1 goto done */
 		if (fsl_readl(&dr_regs->endpointprime) & bitmask)
-			goto out;
+			return;
 
 		do {
 			/* Set ATDTW bit in USBCMD */
@@ -736,28 +755,10 @@ static void fsl_queue_td(struct fsl_ep *ep, struct fsl_req *req)
 		fsl_writel(temp & ~USB_CMD_ATDTW, &dr_regs->usbcmd);
 
 		if (tmp_stat)
-			goto out;
+			return;
 	}
 
-	/* Write dQH next pointer and terminate bit to 0 */
-	temp = req->head->td_dma & EP_QUEUE_HEAD_NEXT_POINTER_MASK;
-	dQH->next_dtd_ptr = cpu_to_hc32(temp);
-
-	/* Clear active and halt bit */
-	temp = cpu_to_hc32(~(EP_QUEUE_HEAD_STATUS_ACTIVE
-			| EP_QUEUE_HEAD_STATUS_HALT));
-	dQH->size_ioc_int_sts &= temp;
-
-	/* Ensure that updates to the QH will occur before priming. */
-	wmb();
-
-	/* Prime endpoint by writing 1 to ENDPTPRIME */
-	temp = ep_is_in(ep)
-		? (1 << (ep_index(ep) + 16))
-		: (1 << (ep_index(ep)));
-	fsl_writel(temp, &dr_regs->endpointprime);
-out:
-	return;
+	fsl_prime_ep(ep, req->head);
 }
 
 /* Fill in the dTD structure
@@ -767,7 +768,7 @@ out:
  * @is_last: return flag if it is the last dTD of the request
  * return: pointer to the built dTD */
 static struct ep_td_struct *fsl_build_dtd(struct fsl_req *req, unsigned *length,
-		dma_addr_t *dma, int *is_last)
+		dma_addr_t *dma, int *is_last, gfp_t gfp_flags)
 {
 	u32 swap_temp;
 	struct ep_td_struct *dtd;
@@ -776,7 +777,7 @@ static struct ep_td_struct *fsl_build_dtd(struct fsl_req *req, unsigned *length,
 	*length = min(req->req.length - req->req.actual,
 			(unsigned)EP_MAX_LENGTH_TRANSFER);
 
-	dtd = dma_pool_alloc(udc_controller->td_pool, GFP_KERNEL, dma);
+	dtd = dma_pool_alloc(udc_controller->td_pool, gfp_flags, dma);
 	if (dtd == NULL)
 		return dtd;
 
@@ -826,7 +827,7 @@ static struct ep_td_struct *fsl_build_dtd(struct fsl_req *req, unsigned *length,
 }
 
 /* Generate dtd chain for a request */
-static int fsl_req_to_dtd(struct fsl_req *req)
+static int fsl_req_to_dtd(struct fsl_req *req, gfp_t gfp_flags)
 {
 	unsigned	count;
 	int		is_last;
@@ -835,7 +836,7 @@ static int fsl_req_to_dtd(struct fsl_req *req)
 	dma_addr_t dma;
 
 	do {
-		dtd = fsl_build_dtd(req, &count, &dma, &is_last);
+		dtd = fsl_build_dtd(req, &count, &dma, &is_last, gfp_flags);
 		if (dtd == NULL)
 			return -ENOMEM;
 
@@ -877,7 +878,7 @@ fsl_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 		VDBG("%s, bad ep", __func__);
 		return -EINVAL;
 	}
-	if (ep->desc->bmAttributes == USB_ENDPOINT_XFER_ISOC) {
+	if (usb_endpoint_xfer_isoc(ep->desc)) {
 		if (req->req.length > ep->ep.maxpacket)
 			return -EMSGSIZE;
 	}
@@ -909,13 +910,11 @@ fsl_ep_queue(struct usb_ep *_ep, struct usb_request *_req, gfp_t gfp_flags)
 	req->req.actual = 0;
 	req->dtd_count = 0;
 
-	spin_lock_irqsave(&udc->lock, flags);
-
 	/* build dtds and push them to device queue */
-	if (!fsl_req_to_dtd(req)) {
+	if (!fsl_req_to_dtd(req, gfp_flags)) {
+		spin_lock_irqsave(&udc->lock, flags);
 		fsl_queue_td(ep, req);
 	} else {
-		spin_unlock_irqrestore(&udc->lock, flags);
 		return -ENOMEM;
 	}
 
@@ -973,25 +972,20 @@ static int fsl_ep_dequeue(struct usb_ep *_ep, struct usb_request *_req)
 
 		/* The request isn't the last request in this ep queue */
 		if (req->queue.next != &ep->queue) {
-			struct ep_queue_head *qh;
 			struct fsl_req *next_req;
 
-			qh = ep->qh;
 			next_req = list_entry(req->queue.next, struct fsl_req,
 					queue);
 
-			/* Point the QH to the first TD of next request */
-			fsl_writel((u32) next_req->head, &qh->curr_dtd_ptr);
+			/* prime with dTD of next request */
+			fsl_prime_ep(ep, next_req->head);
 		}
-
-		/* The request hasn't been processed, patch up the TD chain */
+	/* The request hasn't been processed, patch up the TD chain */
 	} else {
 		struct fsl_req *prev_req;
 
 		prev_req = list_entry(req->queue.prev, struct fsl_req, queue);
-		fsl_writel(fsl_readl(&req->tail->next_td_ptr),
-				&prev_req->tail->next_td_ptr);
-
+		prev_req->tail->next_td_ptr = req->tail->next_td_ptr;
 	}
 
 	done(ep, req, -ECONNRESET);
@@ -1032,7 +1026,7 @@ static int fsl_ep_set_halt(struct usb_ep *_ep, int value)
 		goto out;
 	}
 
-	if (ep->desc->bmAttributes == USB_ENDPOINT_XFER_ISOC) {
+	if (usb_endpoint_xfer_isoc(ep->desc)) {
 		status = -EOPNOTSUPP;
 		goto out;
 	}
@@ -1068,7 +1062,7 @@ static int fsl_ep_fifo_status(struct usb_ep *_ep)
 	struct fsl_udc *udc;
 	int size = 0;
 	u32 bitmask;
-	struct ep_queue_head *d_qh;
+	struct ep_queue_head *qh;
 
 	ep = container_of(_ep, struct fsl_ep, ep);
 	if (!_ep || (!ep->desc && ep_index(ep) != 0))
@@ -1079,13 +1073,13 @@ static int fsl_ep_fifo_status(struct usb_ep *_ep)
 	if (!udc->driver || udc->gadget.speed == USB_SPEED_UNKNOWN)
 		return -ESHUTDOWN;
 
-	d_qh = &ep->udc->ep_qh[ep_index(ep) * 2 + ep_is_in(ep)];
+	qh = get_qh_by_ep(ep);
 
 	bitmask = (ep_is_in(ep)) ? (1 << (ep_index(ep) + 16)) :
 	    (1 << (ep_index(ep)));
 
 	if (fsl_readl(&dr_regs->endptstatus) & bitmask)
-		size = (d_qh->size_ioc_int_sts & DTD_PACKET_SIZE)
+		size = (qh->size_ioc_int_sts & DTD_PACKET_SIZE)
 		    >> DTD_LENGTH_BIT_POS;
 
 	pr_debug("%s %u\n", __func__, size);
@@ -1221,7 +1215,7 @@ static int fsl_vbus_draw(struct usb_gadget *gadget, unsigned mA)
 
 	udc = container_of(gadget, struct fsl_udc, gadget);
 	if (udc->transceiver)
-		return otg_set_power(udc->transceiver, mA);
+		return usb_phy_set_power(udc->transceiver, mA);
 	return -ENOTSUPP;
 }
 
@@ -1299,7 +1293,7 @@ static int ep0_prime_status(struct fsl_udc *udc, int direction)
 			ep_is_in(ep) ? DMA_TO_DEVICE : DMA_FROM_DEVICE);
 	req->mapped = 1;
 
-	if (fsl_req_to_dtd(req) == 0)
+	if (fsl_req_to_dtd(req, GFP_ATOMIC) == 0)
 		fsl_queue_td(ep, req);
 	else
 		return -ENOMEM;
@@ -1383,7 +1377,7 @@ static void ch9getstatus(struct fsl_udc *udc, u8 request_type, u16 value,
 	req->mapped = 1;
 
 	/* prime the data phase */
-	if ((fsl_req_to_dtd(req) == 0))
+	if ((fsl_req_to_dtd(req, GFP_ATOMIC) == 0))
 		fsl_queue_td(ep, req);
 	else			/* no mem */
 		goto stall;
@@ -1434,7 +1428,7 @@ static void setup_received_irq(struct fsl_udc *udc,
 			int pipe = get_pipe_by_windex(wIndex);
 			struct fsl_ep *ep;
 
-			if (wValue != 0 || wLength != 0 || pipe > udc->max_ep)
+			if (wValue != 0 || wLength != 0 || pipe >= udc->max_ep)
 				break;
 			ep = get_ep_by_pipe(udc, pipe);
 
@@ -1677,7 +1671,7 @@ static void dtd_complete_irq(struct fsl_udc *udc)
 	if (!bit_pos)
 		return;
 
-	for (i = 0; i < udc->max_ep * 2; i++) {
+	for (i = 0; i < udc->max_ep; i++) {
 		ep_num = i >> 1;
 		direction = i % 2;
 
@@ -1717,7 +1711,7 @@ static void dtd_complete_irq(struct fsl_udc *udc)
 
 static inline enum usb_device_speed portscx_device_speed(u32 reg)
 {
-	switch (speed & PORTSCX_PORT_SPEED_MASK) {
+	switch (reg & PORTSCX_PORT_SPEED_MASK) {
 	case PORTSCX_PORT_SPEED_HIGH:
 		return USB_SPEED_HIGH;
 	case PORTSCX_PORT_SPEED_FULL:
@@ -1938,8 +1932,7 @@ static int fsl_start(struct usb_gadget_driver *driver,
 	if (!udc_controller)
 		return -ENODEV;
 
-	if (!driver || (driver->speed != USB_SPEED_FULL
-				&& driver->speed != USB_SPEED_HIGH)
+	if (!driver || driver->max_speed < USB_SPEED_FULL
 			|| !bind || !driver->disconnect || !driver->setup)
 		return -EINVAL;
 
@@ -1971,7 +1964,8 @@ static int fsl_start(struct usb_gadget_driver *driver,
 
 		/* connect to bus through transceiver */
 		if (udc_controller->transceiver) {
-			retval = otg_set_peripheral(udc_controller->transceiver,
+			retval = otg_set_peripheral(
+					udc_controller->transceiver->otg,
 						    &udc_controller->gadget);
 			if (retval < 0) {
 				ERR("can't bind to transceiver\n");
@@ -2011,7 +2005,7 @@ static int fsl_stop(struct usb_gadget_driver *driver)
 		return -EINVAL;
 
 	if (udc_controller->transceiver)
-		otg_set_peripheral(udc_controller->transceiver, NULL);
+		otg_set_peripheral(udc_controller->transceiver->otg, NULL);
 
 	/* stop DR, disable intr */
 	dr_controller_stop(udc_controller);
@@ -2435,7 +2429,7 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
 
 #ifdef CONFIG_USB_OTG
 	if (pdata->operating_mode == FSL_USB2_DR_OTG) {
-		udc_controller->transceiver = otg_get_transceiver();
+		udc_controller->transceiver = usb_get_transceiver();
 		if (!udc_controller->transceiver) {
 			ERR("Can't find OTG driver!\n");
 			ret = -ENODEV;
@@ -2480,8 +2474,7 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
 
 #ifndef CONFIG_ARCH_MXC
 	if (pdata->have_sysif_regs)
-		usb_sys_regs = (struct usb_sys_interface *)
-				((u32)dr_regs + USB_DR_SYS_OFFSET);
+		usb_sys_regs = (void *)dr_regs + USB_DR_SYS_OFFSET;
 #endif
 
 	/* Initialize USB clocks */
@@ -2531,7 +2524,7 @@ static int __init fsl_udc_probe(struct platform_device *pdev)
 
 	/* Setup gadget structure */
 	udc_controller->gadget.ops = &fsl_gadget_ops;
-	udc_controller->gadget.is_dualspeed = 1;
+	udc_controller->gadget.max_speed = USB_SPEED_HIGH;
 	udc_controller->gadget.ep0 = &udc_controller->eps[0].ep;
 	INIT_LIST_HEAD(&udc_controller->gadget.ep_list);
 	udc_controller->gadget.speed = USB_SPEED_UNKNOWN;

@@ -21,7 +21,6 @@
 #include <asm/ipl.h>
 #include <asm/sclp.h>
 #include <asm/setup.h>
-#include <asm/sigp.h>
 #include <asm/uaccess.h>
 #include <asm/debug.h>
 #include <asm/processor.h>
@@ -640,6 +639,8 @@ static int __init zcore_init(void)
 	int rc;
 
 	if (ipl_info.type != IPL_TYPE_FCP_DUMP)
+		return -ENODATA;
+	if (OLDMEM_BASE)
 		return -ENODATA;
 
 	zcore_dbf = debug_register("zcore", 4, 1, 4 * sizeof(long));

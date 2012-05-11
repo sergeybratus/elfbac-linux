@@ -32,6 +32,7 @@
 /* VENDOR SPEC register */
 #define SDHCI_VENDOR_SPEC		0xC0
 #define  SDHCI_VENDOR_SPEC_SDIO_QUIRK	0x00000002
+#define SDHCI_WTMK_LVL			0x44
 #define SDHCI_MIX_CTRL			0x48
 
 /*
@@ -268,8 +269,9 @@ static void esdhc_writew_le(struct sdhci_host *host, u16 val, int reg)
 		imx_data->scratchpad = val;
 		return;
 	case SDHCI_COMMAND:
-		if ((host->cmd->opcode == MMC_STOP_TRANSMISSION)
-			&& (imx_data->flags & ESDHC_FLAG_MULTIBLK_NO_INT))
+		if ((host->cmd->opcode == MMC_STOP_TRANSMISSION ||
+		     host->cmd->opcode == MMC_SET_BLOCK_COUNT) &&
+	            (imx_data->flags & ESDHC_FLAG_MULTIBLK_NO_INT))
 			val |= SDHCI_CMD_ABORTCMD;
 
 		if (is_imx6q_usdhc(imx_data)) {
@@ -462,7 +464,7 @@ static int __devinit sdhci_esdhc_imx_probe(struct platform_device *pdev)
 		err = PTR_ERR(clk);
 		goto err_clk_get;
 	}
-	clk_enable(clk);
+	clk_prepare_enable(clk);
 	pltfm_host->clk = clk;
 
 	if (!is_imx25_esdhc(imx_data))
@@ -475,6 +477,13 @@ static int __devinit sdhci_esdhc_imx_probe(struct platform_device *pdev)
 
 	if (is_imx53_esdhc(imx_data))
 		imx_data->flags |= ESDHC_FLAG_MULTIBLK_NO_INT;
+
+	/*
+	 * The imx6q ROM code will change the default watermark level setting
+	 * to something insane.  Change it back here.
+	 */
+	if (is_imx6q_usdhc(imx_data))
+		writel(0x08100810, host->ioaddr + SDHCI_WTMK_LVL);
 
 	boarddata = &imx_data->boarddata;
 	if (sdhci_esdhc_imx_probe_dt(pdev, boarddata) < 0) {
@@ -550,7 +559,7 @@ no_card_detect_irq:
 		gpio_free(boarddata->wp_gpio);
 no_card_detect_pin:
 no_board_data:
-	clk_disable(pltfm_host->clk);
+	clk_disable_unprepare(pltfm_host->clk);
 	clk_put(pltfm_host->clk);
 err_clk_get:
 	kfree(imx_data);
@@ -577,7 +586,7 @@ static int __devexit sdhci_esdhc_imx_remove(struct platform_device *pdev)
 		gpio_free(boarddata->cd_gpio);
 	}
 
-	clk_disable(pltfm_host->clk);
+	clk_disable_unprepare(pltfm_host->clk);
 	clk_put(pltfm_host->clk);
 	kfree(imx_data);
 
@@ -591,27 +600,14 @@ static struct platform_driver sdhci_esdhc_imx_driver = {
 		.name	= "sdhci-esdhc-imx",
 		.owner	= THIS_MODULE,
 		.of_match_table = imx_esdhc_dt_ids,
+		.pm	= SDHCI_PLTFM_PMOPS,
 	},
 	.id_table	= imx_esdhc_devtype,
 	.probe		= sdhci_esdhc_imx_probe,
 	.remove		= __devexit_p(sdhci_esdhc_imx_remove),
-#ifdef CONFIG_PM
-	.suspend	= sdhci_pltfm_suspend,
-	.resume		= sdhci_pltfm_resume,
-#endif
 };
 
-static int __init sdhci_esdhc_imx_init(void)
-{
-	return platform_driver_register(&sdhci_esdhc_imx_driver);
-}
-module_init(sdhci_esdhc_imx_init);
-
-static void __exit sdhci_esdhc_imx_exit(void)
-{
-	platform_driver_unregister(&sdhci_esdhc_imx_driver);
-}
-module_exit(sdhci_esdhc_imx_exit);
+module_platform_driver(sdhci_esdhc_imx_driver);
 
 MODULE_DESCRIPTION("SDHCI driver for Freescale i.MX eSDHC");
 MODULE_AUTHOR("Wolfram Sang <w.sang@pengutronix.de>");

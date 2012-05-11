@@ -41,12 +41,8 @@
 #include <scsi/libfc.h>
 
 #include <target/target_core_base.h>
-#include <target/target_core_transport.h>
-#include <target/target_core_fabric_ops.h>
+#include <target/target_core_fabric.h>
 #include <target/target_core_fabric_configfs.h>
-#include <target/target_core_fabric_lib.h>
-#include <target/target_core_device.h>
-#include <target/target_core_tpg.h>
 #include <target/target_core_configfs.h>
 #include <target/configfs_macros.h>
 
@@ -436,8 +432,7 @@ static void ft_del_lport(struct se_wwn *wwn)
 	struct ft_lport_acl *lacl = container_of(wwn,
 				struct ft_lport_acl, fc_lport_wwn);
 
-	pr_debug("del lport %s\n",
-			config_item_name(&wwn->wwn_group.cg_item));
+	pr_debug("del lport %s\n", lacl->name);
 	mutex_lock(&ft_lport_lock);
 	list_del(&lacl->list);
 	mutex_unlock(&ft_lport_lock);
@@ -534,9 +529,6 @@ static struct target_core_fabric_ops ft_fabric_ops = {
 	.release_cmd =			ft_release_cmd,
 	.shutdown_session =		ft_sess_shutdown,
 	.close_session =		ft_sess_close,
-	.stop_session =			ft_sess_stop,
-	.fall_back_to_erl0 =		ft_sess_set_erl0,
-	.sess_logged_in =		ft_sess_logged_in,
 	.sess_get_index =		ft_sess_get_index,
 	.sess_get_initiator_sid =	NULL,
 	.write_pending =		ft_write_pending,
@@ -549,7 +541,6 @@ static struct target_core_fabric_ops ft_fabric_ops = {
 	.queue_tm_rsp =			ft_queue_tm_resp,
 	.get_fabric_sense_len =		ft_get_fabric_sense_len,
 	.set_fabric_sense_len =		ft_set_fabric_sense_len,
-	.is_state_remove =		ft_is_state_remove,
 	/*
 	 * Setup function pointers for generic logic in
 	 * target_core_fabric_configfs.c

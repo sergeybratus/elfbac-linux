@@ -112,6 +112,10 @@ struct sh_mobile_ceu_dev {
 
 	u32 cflcr;
 
+	/* static max sizes either from platform data or default */
+	int max_width;
+	int max_height;
+
 	enum v4l2_field field;
 	int sequence;
 
@@ -566,8 +570,10 @@ static int sh_mobile_ceu_add_device(struct soc_camera_device *icd)
 	ret = sh_mobile_ceu_soft_reset(pcdev);
 
 	csi2_sd = find_csi2(pcdev);
-	if (csi2_sd)
-		csi2_sd->grp_id = (long)icd;
+	if (csi2_sd) {
+		csi2_sd->grp_id = soc_camera_grp_id(icd);
+		v4l2_set_subdev_hostdata(csi2_sd, icd);
+	}
 
 	ret = v4l2_subdev_call(csi2_sd, core, s_power, 1);
 	if (ret < 0 && ret != -ENOIOCTLCMD && ret != -ENODEV) {
@@ -768,7 +774,7 @@ static struct v4l2_subdev *find_bus_subdev(struct sh_mobile_ceu_dev *pcdev,
 {
 	if (pcdev->csi2_pdev) {
 		struct v4l2_subdev *csi2_sd = find_csi2(pcdev);
-		if (csi2_sd && csi2_sd->grp_id == (u32)icd)
+		if (csi2_sd && csi2_sd->grp_id == soc_camera_grp_id(icd))
 			return csi2_sd;
 	}
 
@@ -784,8 +790,7 @@ static struct v4l2_subdev *find_bus_subdev(struct sh_mobile_ceu_dev *pcdev,
 		V4L2_MBUS_DATA_ACTIVE_HIGH)
 
 /* Capture is not running, no interrupts, no locking needed */
-static int sh_mobile_ceu_set_bus_param(struct soc_camera_device *icd,
-				       __u32 pixfmt)
+static int sh_mobile_ceu_set_bus_param(struct soc_camera_device *icd)
 {
 	struct soc_camera_host *ici = to_soc_camera_host(icd->parent);
 	struct sh_mobile_ceu_dev *pcdev = ici->priv;
@@ -922,11 +927,6 @@ static int sh_mobile_ceu_set_bus_param(struct soc_camera_device *icd,
 
 	ceu_write(pcdev, CDOCR, value);
 	ceu_write(pcdev, CFWCR, 0); /* keep "datafetch firewall" disabled */
-
-	dev_dbg(icd->parent, "S_FMT successful for %c%c%c%c %ux%u\n",
-		pixfmt & 0xff, (pixfmt >> 8) & 0xff,
-		(pixfmt >> 16) & 0xff, (pixfmt >> 24) & 0xff,
-		icd->user_width, icd->user_height);
 
 	capture_restore(pcdev, capsr);
 
@@ -1085,12 +1085,21 @@ static int sh_mobile_ceu_get_formats(struct soc_camera_device *icd, unsigned int
 		if (ret < 0)
 			return ret;
 
-		while ((mf.width > 2560 || mf.height > 1920) && shift < 4) {
+		/*
+		 * All currently existing CEU implementations support 2560x1920
+		 * or larger frames. If the sensor is proposing too big a frame,
+		 * don't bother with possibly supportred by the CEU larger
+		 * sizes, just try VGA multiples. If needed, this can be
+		 * adjusted in the future.
+		 */
+		while ((mf.width > pcdev->max_width ||
+			mf.height > pcdev->max_height) && shift < 4) {
 			/* Try 2560x1920, 1280x960, 640x480, 320x240 */
 			mf.width	= 2560 >> shift;
 			mf.height	= 1920 >> shift;
-			ret = v4l2_device_call_until_err(sd->v4l2_dev, (long)icd, video,
-							 s_mbus_fmt, &mf);
+			ret = v4l2_device_call_until_err(sd->v4l2_dev,
+					soc_camera_grp_id(icd), video,
+					s_mbus_fmt, &mf);
 			if (ret < 0)
 				return ret;
 			shift++;
@@ -1380,6 +1389,8 @@ static int client_s_crop(struct soc_camera_device *icd, struct v4l2_crop *crop,
 static int client_s_fmt(struct soc_camera_device *icd,
 			struct v4l2_mbus_framefmt *mf, bool ceu_can_scale)
 {
+	struct soc_camera_host *ici = to_soc_camera_host(icd->parent);
+	struct sh_mobile_ceu_dev *pcdev = ici->priv;
 	struct sh_mobile_ceu_cam *cam = icd->host_priv;
 	struct v4l2_subdev *sd = soc_camera_to_subdev(icd);
 	struct device *dev = icd->parent;
@@ -1389,7 +1400,8 @@ static int client_s_fmt(struct soc_camera_device *icd,
 	bool ceu_1to1;
 	int ret;
 
-	ret = v4l2_device_call_until_err(sd->v4l2_dev, (long)icd, video,
+	ret = v4l2_device_call_until_err(sd->v4l2_dev,
+					 soc_camera_grp_id(icd), video,
 					 s_mbus_fmt, mf);
 	if (ret < 0)
 		return ret;
@@ -1412,8 +1424,8 @@ static int client_s_fmt(struct soc_camera_device *icd,
 	if (ret < 0)
 		return ret;
 
-	max_width = min(cap.bounds.width, 2560);
-	max_height = min(cap.bounds.height, 1920);
+	max_width = min(cap.bounds.width, pcdev->max_width);
+	max_height = min(cap.bounds.height, pcdev->max_height);
 
 	/* Camera set a format, but geometry is not precise, try to improve */
 	tmp_w = mf->width;
@@ -1426,8 +1438,9 @@ static int client_s_fmt(struct soc_camera_device *icd,
 		tmp_h = min(2 * tmp_h, max_height);
 		mf->width = tmp_w;
 		mf->height = tmp_h;
-		ret = v4l2_device_call_until_err(sd->v4l2_dev, (long)icd, video,
-						 s_mbus_fmt, mf);
+		ret = v4l2_device_call_until_err(sd->v4l2_dev,
+					soc_camera_grp_id(icd), video,
+					s_mbus_fmt, mf);
 		dev_geo(dev, "Camera scaled to %ux%u\n",
 			mf->width, mf->height);
 		if (ret < 0) {
@@ -1552,7 +1565,7 @@ static int sh_mobile_ceu_set_crop(struct soc_camera_device *icd,
 	if (ret < 0)
 		return ret;
 
-	if (mf.width > 2560 || mf.height > 1920)
+	if (mf.width > pcdev->max_width || mf.height > pcdev->max_height)
 		return -EINVAL;
 
 	/* 4. Calculate camera scales */
@@ -1580,8 +1593,9 @@ static int sh_mobile_ceu_set_crop(struct soc_camera_device *icd,
 	}
 
 	if (interm_width < icd->user_width || interm_height < icd->user_height) {
-		ret = v4l2_device_call_until_err(sd->v4l2_dev, (int)icd, video,
-						 s_mbus_fmt, &mf);
+		ret = v4l2_device_call_until_err(sd->v4l2_dev,
+					soc_camera_grp_id(icd), video,
+					s_mbus_fmt, &mf);
 		if (ret < 0)
 			return ret;
 
@@ -1834,6 +1848,8 @@ static int sh_mobile_ceu_set_fmt(struct soc_camera_device *icd,
 static int sh_mobile_ceu_try_fmt(struct soc_camera_device *icd,
 				 struct v4l2_format *f)
 {
+	struct soc_camera_host *ici = to_soc_camera_host(icd->parent);
+	struct sh_mobile_ceu_dev *pcdev = ici->priv;
 	const struct soc_camera_format_xlate *xlate;
 	struct v4l2_pix_format *pix = &f->fmt.pix;
 	struct v4l2_subdev *sd = soc_camera_to_subdev(icd);
@@ -1854,8 +1870,8 @@ static int sh_mobile_ceu_try_fmt(struct soc_camera_device *icd,
 	/* FIXME: calculate using depth and bus width */
 
 	/* CFSZR requires height and width to be 4-pixel aligned */
-	v4l_bound_align_image(&pix->width, 2, 2560, 2,
-			      &pix->height, 4, 1920, 2, 0);
+	v4l_bound_align_image(&pix->width, 2, pcdev->max_width, 2,
+			      &pix->height, 4, pcdev->max_height, 2, 0);
 
 	width = pix->width;
 	height = pix->height;
@@ -1867,7 +1883,8 @@ static int sh_mobile_ceu_try_fmt(struct soc_camera_device *icd,
 	mf.code		= xlate->code;
 	mf.colorspace	= pix->colorspace;
 
-	ret = v4l2_device_call_until_err(sd->v4l2_dev, (long)icd, video, try_mbus_fmt, &mf);
+	ret = v4l2_device_call_until_err(sd->v4l2_dev, soc_camera_grp_id(icd),
+					 video, try_mbus_fmt, &mf);
 	if (ret < 0)
 		return ret;
 
@@ -1889,10 +1906,11 @@ static int sh_mobile_ceu_try_fmt(struct soc_camera_device *icd,
 			 * requested a bigger rectangle, it will not return a
 			 * smaller one.
 			 */
-			mf.width = 2560;
-			mf.height = 1920;
-			ret = v4l2_device_call_until_err(sd->v4l2_dev, (long)icd, video,
-							 try_mbus_fmt, &mf);
+			mf.width = pcdev->max_width;
+			mf.height = pcdev->max_height;
+			ret = v4l2_device_call_until_err(sd->v4l2_dev,
+					soc_camera_grp_id(icd), video,
+					try_mbus_fmt, &mf);
 			if (ret < 0) {
 				/* Shouldn't actually happen... */
 				dev_err(icd->parent,
@@ -1958,8 +1976,7 @@ static int sh_mobile_ceu_set_livecrop(struct soc_camera_device *icd,
 		if (!ret) {
 			icd->user_width		= out_width & ~3;
 			icd->user_height	= out_height & ~3;
-			ret = sh_mobile_ceu_set_bus_param(icd,
-					icd->current_fmt->host_fmt->fourcc);
+			ret = sh_mobile_ceu_set_bus_param(icd);
 		}
 	}
 
@@ -2080,6 +2097,9 @@ static int __devinit sh_mobile_ceu_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "CEU platform data not set.\n");
 		goto exit_kfree;
 	}
+
+	pcdev->max_width = pcdev->pdata->max_width ? : 2560;
+	pcdev->max_height = pcdev->pdata->max_height ? : 1920;
 
 	base = ioremap_nocache(res->start, resource_size(res));
 	if (!base) {

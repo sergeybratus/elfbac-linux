@@ -1676,15 +1676,9 @@ struct ccw_device *get_ccwdev_by_busid(struct ccw_driver *cdrv,
 				       const char *bus_id)
 {
 	struct device *dev;
-	struct device_driver *drv;
 
-	drv = get_driver(&cdrv->driver);
-	if (!drv)
-		return NULL;
-
-	dev = driver_find_device(drv, NULL, (void *)bus_id,
+	dev = driver_find_device(&cdrv->driver, NULL, (void *)bus_id,
 				 __ccwdev_check_busid);
-	put_driver(drv);
 
 	return dev ? to_ccwdev(dev) : NULL;
 }
@@ -1868,9 +1862,9 @@ static void __ccw_device_pm_restore(struct ccw_device *cdev)
 	 */
 	cdev->private->flags.resuming = 1;
 	cdev->private->path_new_mask = LPM_ANYPATH;
-	css_schedule_eval(sch->schid);
+	css_sched_sch_todo(sch, SCH_TODO_EVAL);
 	spin_unlock_irq(sch->lock);
-	css_complete_work();
+	css_wait_for_slow_path();
 
 	/* cdev may have been moved to a different subchannel. */
 	sch = to_subchannel(cdev->dev.parent);

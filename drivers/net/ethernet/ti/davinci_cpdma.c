@@ -822,7 +822,7 @@ int cpdma_chan_stop(struct cpdma_chan *chan)
 	dma_reg_write(ctlr, chan->int_clear, chan->mask);
 
 	/* trigger teardown */
-	dma_reg_write(ctlr, chan->td, chan->chan_num);
+	dma_reg_write(ctlr, chan->td, chan_linear(chan));
 
 	/* wait for teardown complete */
 	timeout = jiffies + HZ/10;	/* 100 msec */
@@ -836,11 +836,13 @@ int cpdma_chan_stop(struct cpdma_chan *chan)
 	chan_write(chan, cp, CPDMA_TEARDOWN_VALUE);
 
 	/* handle completed packets */
+	spin_unlock_irqrestore(&chan->lock, flags);
 	do {
 		ret = __cpdma_chan_process(chan);
 		if (ret < 0)
 			break;
 	} while ((ret & CPDMA_DESC_TD_COMPLETE) == 0);
+	spin_lock_irqsave(&chan->lock, flags);
 
 	/* remaining packets haven't been tx/rx'ed, clean them up */
 	while (chan->head) {

@@ -8,6 +8,7 @@
 
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/device.h>
 #include <linux/io.h>
 #include <linux/pm.h>
 #include <linux/pm_clock.h>
@@ -229,7 +230,8 @@ int pm_clk_suspend(struct device *dev)
 
 	list_for_each_entry_reverse(ce, &psd->clock_list, node) {
 		if (ce->status < PCE_STATUS_ERROR) {
-			clk_disable(ce->clk);
+			if (ce->status == PCE_STATUS_ENABLED)
+				clk_disable(ce->clk);
 			ce->status = PCE_STATUS_ACQUIRED;
 		}
 	}

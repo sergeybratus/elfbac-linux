@@ -30,7 +30,6 @@
 #include <asm/btext.h>
 #include <asm/machdep.h>
 #include <asm/uaccess.h>
-#include <asm/system.h>
 #include <asm/pmac_feature.h>
 #include <asm/sections.h>
 #include <asm/nvram.h>
@@ -106,6 +105,8 @@ notrace unsigned long __init early_init(unsigned long dt_ptr)
 	do_lwsync_fixups(spec->cpu_features,
 			 PTRRELOC(&__start___lwsync_fixup),
 			 PTRRELOC(&__stop___lwsync_fixup));
+
+	do_final_fixups();
 
 	return KERNELBASE + offset;
 }

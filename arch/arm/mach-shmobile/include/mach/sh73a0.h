@@ -470,6 +470,14 @@ enum {
 	GPIO_FN_SDHICMD2_PU,
 	GPIO_FN_MMCCMD0_PU,
 	GPIO_FN_MMCCMD1_PU,
+	GPIO_FN_MMCD0_0_PU,
+	GPIO_FN_MMCD0_1_PU,
+	GPIO_FN_MMCD0_2_PU,
+	GPIO_FN_MMCD0_3_PU,
+	GPIO_FN_MMCD0_4_PU,
+	GPIO_FN_MMCD0_5_PU,
+	GPIO_FN_MMCD0_6_PU,
+	GPIO_FN_MMCD0_7_PU,
 	GPIO_FN_FSIACK_PU,
 	GPIO_FN_FSIAILR_PU,
 	GPIO_FN_FSIAIBT_PU,
@@ -507,8 +515,8 @@ enum {
 	SHDMA_SLAVE_MMCIF_RX,
 };
 
-/* PINT interrupts are located at Linux IRQ 768 and up */
-#define SH73A0_PINT0_IRQ(irq) ((irq) + 768)
-#define SH73A0_PINT1_IRQ(irq) ((irq) + 800)
+/* PINT interrupts are located at Linux IRQ 800 and up */
+#define SH73A0_PINT0_IRQ(irq) ((irq) + 800)
+#define SH73A0_PINT1_IRQ(irq) ((irq) + 832)
 
 #endif /* __ASM_SH73A0_H__ */

@@ -1083,8 +1083,10 @@ static int mt9t112_probe(struct i2c_client *client,
 	v4l2_i2c_subdev_init(&priv->subdev, client, &mt9t112_subdev_ops);
 
 	ret = mt9t112_camera_probe(client);
-	if (ret)
+	if (ret) {
 		kfree(priv);
+		return ret;
+	}
 
 	/* Cannot fail: using the default supported pixel code */
 	mt9t112_set_params(priv, &rect, V4L2_MBUS_FMT_UYVY8_2X8);
@@ -1115,21 +1117,7 @@ static struct i2c_driver mt9t112_i2c_driver = {
 	.id_table = mt9t112_id,
 };
 
-/************************************************************************
-			module function
-************************************************************************/
-static int __init mt9t112_module_init(void)
-{
-	return i2c_add_driver(&mt9t112_i2c_driver);
-}
-
-static void __exit mt9t112_module_exit(void)
-{
-	i2c_del_driver(&mt9t112_i2c_driver);
-}
-
-module_init(mt9t112_module_init);
-module_exit(mt9t112_module_exit);
+module_i2c_driver(mt9t112_i2c_driver);
 
 MODULE_DESCRIPTION("SoC Camera driver for mt9t112");
 MODULE_AUTHOR("Kuninori Morimoto");

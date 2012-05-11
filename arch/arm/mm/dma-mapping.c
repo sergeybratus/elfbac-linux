@@ -168,7 +168,7 @@ static int __init consistent_init(void)
 	pte_t *pte;
 	int i = 0;
 	unsigned long base = consistent_base;
-	unsigned long num_ptes = (CONSISTENT_END - base) >> PGDIR_SHIFT;
+	unsigned long num_ptes = (CONSISTENT_END - base) >> PMD_SHIFT;
 
 	consistent_pte = kmalloc(num_ptes * sizeof(pte_t), GFP_KERNEL);
 	if (!consistent_pte) {
@@ -214,7 +214,8 @@ static int __init consistent_init(void)
 core_initcall(consistent_init);
 
 static void *
-__dma_alloc_remap(struct page *page, size_t size, gfp_t gfp, pgprot_t prot)
+__dma_alloc_remap(struct page *page, size_t size, gfp_t gfp, pgprot_t prot,
+	const void *caller)
 {
 	struct arm_vmregion *c;
 	size_t align;
@@ -241,7 +242,7 @@ __dma_alloc_remap(struct page *page, size_t size, gfp_t gfp, pgprot_t prot)
 	 * Allocate a virtual address in the consistent mapping region.
 	 */
 	c = arm_vmregion_alloc(&consistent_head, align, size,
-			    gfp & ~(__GFP_DMA | __GFP_HIGHMEM));
+			    gfp & ~(__GFP_DMA | __GFP_HIGHMEM), caller);
 	if (c) {
 		pte_t *pte;
 		int idx = CONSISTENT_PTE_INDEX(c->vm_start);
@@ -320,17 +321,26 @@ static void __dma_free_remap(void *cpu_addr, size_t size)
 
 #else	/* !CONFIG_MMU */
 
-#define __dma_alloc_remap(page, size, gfp, prot)	page_address(page)
+#define __dma_alloc_remap(page, size, gfp, prot, c)	page_address(page)
 #define __dma_free_remap(addr, size)			do { } while (0)
 
 #endif	/* CONFIG_MMU */
 
 static void *
 __dma_alloc(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gfp,
-	    pgprot_t prot)
+	    pgprot_t prot, const void *caller)
 {
 	struct page *page;
 	void *addr;
+
+	/*
+	 * Following is a work-around (a.k.a. hack) to prevent pages
+	 * with __GFP_COMP being passed to split_page() which cannot
+	 * handle them.  The real problem is that this flag probably
+	 * should be 0 on ARM as it is not supported on this
+	 * platform; see CONFIG_HUGETLBFS.
+	 */
+	gfp &= ~(__GFP_COMP);
 
 	*handle = ~0;
 	size = PAGE_ALIGN(size);
@@ -340,7 +350,7 @@ __dma_alloc(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gfp,
 		return NULL;
 
 	if (!arch_is_coherent())
-		addr = __dma_alloc_remap(page, size, gfp, prot);
+		addr = __dma_alloc_remap(page, size, gfp, prot, caller);
 	else
 		addr = page_address(page);
 
@@ -365,7 +375,8 @@ dma_alloc_coherent(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gf
 		return memory;
 
 	return __dma_alloc(dev, size, handle, gfp,
-			   pgprot_dmacoherent(pgprot_kernel));
+			   pgprot_dmacoherent(pgprot_kernel),
+			   __builtin_return_address(0));
 }
 EXPORT_SYMBOL(dma_alloc_coherent);
 
@@ -377,7 +388,8 @@ void *
 dma_alloc_writecombine(struct device *dev, size_t size, dma_addr_t *handle, gfp_t gfp)
 {
 	return __dma_alloc(dev, size, handle, gfp,
-			   pgprot_writecombine(pgprot_kernel));
+			   pgprot_writecombine(pgprot_kernel),
+			   __builtin_return_address(0));
 }
 EXPORT_SYMBOL(dma_alloc_writecombine);
 
@@ -714,6 +726,9 @@ EXPORT_SYMBOL(dma_set_mask);
 
 static int __init dma_debug_do_init(void)
 {
+#ifdef CONFIG_MMU
+	arm_vmregion_create_proc("dma-mappings", &consistent_head);
+#endif
 	dma_debug_init(PREALLOC_DMA_DEBUG_ENTRIES);
 	return 0;
 }

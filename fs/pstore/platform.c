@@ -68,9 +68,25 @@ void pstore_set_kmsg_bytes(int bytes)
 /* Tag each group of saved records with a sequence number */
 static int	oopscount;
 
-static char *reason_str[] = {
-	"Oops", "Panic", "Kexec", "Restart", "Halt", "Poweroff", "Emergency"
-};
+static const char *get_reason_str(enum kmsg_dump_reason reason)
+{
+	switch (reason) {
+	case KMSG_DUMP_PANIC:
+		return "Panic";
+	case KMSG_DUMP_OOPS:
+		return "Oops";
+	case KMSG_DUMP_EMERG:
+		return "Emergency";
+	case KMSG_DUMP_RESTART:
+		return "Restart";
+	case KMSG_DUMP_HALT:
+		return "Halt";
+	case KMSG_DUMP_POWEROFF:
+		return "Poweroff";
+	default:
+		return "Unknown";
+	}
+}
 
 /*
  * callback from kmsg_dump. (s2,l2) has the most recently
@@ -85,17 +101,15 @@ static void pstore_dump(struct kmsg_dumper *dumper,
 	unsigned long	s1_start, s2_start;
 	unsigned long	l1_cpy, l2_cpy;
 	unsigned long	size, total = 0;
-	char		*dst, *why;
+	char		*dst;
+	const char	*why;
 	u64		id;
 	int		hsize, ret;
 	unsigned int	part = 1;
 	unsigned long	flags = 0;
 	int		is_locked = 0;
 
-	if (reason < ARRAY_SIZE(reason_str))
-		why = reason_str[reason];
-	else
-		why = "Unknown";
+	why = get_reason_str(reason);
 
 	if (in_nmi()) {
 		is_locked = spin_trylock(&psinfo->buf_lock);
@@ -122,7 +136,7 @@ static void pstore_dump(struct kmsg_dumper *dumper,
 		memcpy(dst, s1 + s1_start, l1_cpy);
 		memcpy(dst + l1_cpy, s2 + s2_start, l2_cpy);
 
-		ret = psinfo->write(PSTORE_TYPE_DMESG, &id, part,
+		ret = psinfo->write(PSTORE_TYPE_DMESG, reason, &id, part,
 				   hsize + l1_cpy + l2_cpy, psinfo);
 		if (ret == 0 && reason == KMSG_DUMP_OOPS && pstore_is_mounted())
 			pstore_new_entry = 1;
@@ -167,6 +181,7 @@ int pstore_register(struct pstore_info *psi)
 	}
 
 	psinfo = psi;
+	mutex_init(&psinfo->read_mutex);
 	spin_unlock(&pstore_lock);
 
 	if (owner && !try_module_get(owner)) {
@@ -195,30 +210,32 @@ EXPORT_SYMBOL_GPL(pstore_register);
 void pstore_get_records(int quiet)
 {
 	struct pstore_info *psi = psinfo;
+	char			*buf = NULL;
 	ssize_t			size;
 	u64			id;
 	enum pstore_type_id	type;
 	struct timespec		time;
 	int			failed = 0, rc;
-	unsigned long		flags;
 
 	if (!psi)
 		return;
 
-	spin_lock_irqsave(&psinfo->buf_lock, flags);
-	rc = psi->open(psi);
-	if (rc)
+	mutex_lock(&psi->read_mutex);
+	if (psi->open && psi->open(psi))
 		goto out;
 
-	while ((size = psi->read(&id, &type, &time, psi)) > 0) {
-		rc = pstore_mkfile(type, psi->name, id, psi->buf, (size_t)size,
+	while ((size = psi->read(&id, &type, &time, &buf, psi)) > 0) {
+		rc = pstore_mkfile(type, psi->name, id, buf, (size_t)size,
 				  time, psi);
+		kfree(buf);
+		buf = NULL;
 		if (rc && (rc != -EEXIST || !quiet))
 			failed++;
 	}
-	psi->close(psi);
+	if (psi->close)
+		psi->close(psi);
 out:
-	spin_unlock_irqrestore(&psinfo->buf_lock, flags);
+	mutex_unlock(&psi->read_mutex);
 
 	if (failed)
 		printk(KERN_WARNING "pstore: failed to load %d record(s) from '%s'\n",
@@ -239,34 +256,6 @@ static void pstore_timefunc(unsigned long dummy)
 
 	mod_timer(&pstore_timer, jiffies + PSTORE_INTERVAL);
 }
-
-/*
- * Call platform driver to write a record to the
- * persistent store.
- */
-int pstore_write(enum pstore_type_id type, char *buf, size_t size)
-{
-	u64		id;
-	int		ret;
-	unsigned long	flags;
-
-	if (!psinfo)
-		return -ENODEV;
-
-	if (size > psinfo->bufsize)
-		return -EFBIG;
-
-	spin_lock_irqsave(&psinfo->buf_lock, flags);
-	memcpy(psinfo->buf, buf, size);
-	ret = psinfo->write(type, &id, 0, size, psinfo);
-	if (ret == 0 && pstore_is_mounted())
-		pstore_mkfile(PSTORE_TYPE_DMESG, psinfo->name, id, psinfo->buf,
-			      size, CURRENT_TIME, psinfo);
-	spin_unlock_irqrestore(&psinfo->buf_lock, flags);
-
-	return 0;
-}
-EXPORT_SYMBOL_GPL(pstore_write);
 
 module_param(backend, charp, 0444);
 MODULE_PARM_DESC(backend, "Pstore backend to use");

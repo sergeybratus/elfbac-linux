@@ -21,7 +21,6 @@
 #include <linux/pm_runtime.h>
 #include <linux/types.h>
 #include <linux/slab.h>
-#include <linux/version.h>
 #include <media/v4l2-ctrls.h>
 #include <media/media-device.h>
 
@@ -220,6 +219,7 @@ static struct v4l2_subdev *fimc_md_register_sensor(struct fimc_md *fmd,
 	sd = v4l2_i2c_new_subdev_board(&fmd->v4l2_dev, adapter,
 				       s_info->pdata->board_info, NULL);
 	if (IS_ERR_OR_NULL(sd)) {
+		i2c_put_adapter(adapter);
 		v4l2_err(&fmd->v4l2_dev, "Failed to acquire subdev\n");
 		return NULL;
 	}
@@ -234,12 +234,15 @@ static struct v4l2_subdev *fimc_md_register_sensor(struct fimc_md *fmd,
 static void fimc_md_unregister_sensor(struct v4l2_subdev *sd)
 {
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
+	struct i2c_adapter *adapter;
 
 	if (!client)
 		return;
 	v4l2_device_unregister_subdev(sd);
+	adapter = client->adapter;
 	i2c_unregister_device(client);
-	i2c_put_adapter(client->adapter);
+	if (adapter)
+		i2c_put_adapter(adapter);
 }
 
 static int fimc_md_register_sensor_entities(struct fimc_md *fmd)
@@ -341,16 +344,13 @@ static int fimc_md_register_platform_entities(struct fimc_md *fmd)
 		return -ENODEV;
 	ret = driver_for_each_device(driver, NULL, fmd,
 				     fimc_register_callback);
-	put_driver(driver);
 	if (ret)
 		return ret;
 
 	driver = driver_find(CSIS_DRIVER_NAME, &platform_bus_type);
-	if (driver) {
+	if (driver)
 		ret = driver_for_each_device(driver, NULL, fmd,
 					     csis_register_callback);
-		put_driver(driver);
-	}
 	return ret;
 }
 
@@ -381,20 +381,28 @@ static void fimc_md_unregister_entities(struct fimc_md *fmd)
 
 static int fimc_md_register_video_nodes(struct fimc_md *fmd)
 {
+	struct video_device *vdev;
 	int i, ret = 0;
 
 	for (i = 0; i < FIMC_MAX_DEVS && !ret; i++) {
 		if (!fmd->fimc[i])
 			continue;
 
-		if (fmd->fimc[i]->m2m.vfd)
-			ret = video_register_device(fmd->fimc[i]->m2m.vfd,
-						    VFL_TYPE_GRABBER, -1);
-		if (ret)
-			break;
-		if (fmd->fimc[i]->vid_cap.vfd)
-			ret = video_register_device(fmd->fimc[i]->vid_cap.vfd,
-						    VFL_TYPE_GRABBER, -1);
+		vdev = fmd->fimc[i]->m2m.vfd;
+		if (vdev) {
+			ret = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
+			if (ret)
+				break;
+			v4l2_info(&fmd->v4l2_dev, "Registered %s as /dev/%s\n",
+				  vdev->name, video_device_node_name(vdev));
+		}
+
+		vdev = fmd->fimc[i]->vid_cap.vfd;
+		if (vdev == NULL)
+			continue;
+		ret = video_register_device(vdev, VFL_TYPE_GRABBER, -1);
+		v4l2_info(&fmd->v4l2_dev, "Registered %s as /dev/%s\n",
+			  vdev->name, video_device_node_name(vdev));
 	}
 
 	return ret;
@@ -502,7 +510,7 @@ static int fimc_md_create_links(struct fimc_md *fmd)
 			if (WARN(csis == NULL,
 				 "MIPI-CSI interface specified "
 				 "but s5p-csis module is not loaded!\n"))
-				continue;
+				return -EINVAL;
 
 			ret = media_entity_create_link(&sensor->entity, 0,
 					      &csis->entity, CSIS_PAD_SINK,
@@ -742,10 +750,7 @@ static int __devinit fimc_md_probe(struct platform_device *pdev)
 	struct fimc_md *fmd;
 	int ret;
 
-	if (WARN(!pdev->dev.platform_data, "Platform data not specified!\n"))
-		return -EINVAL;
-
-	fmd = kzalloc(sizeof(struct fimc_md), GFP_KERNEL);
+	fmd = devm_kzalloc(&pdev->dev, sizeof(*fmd), GFP_KERNEL);
 	if (!fmd)
 		return -ENOMEM;
 
@@ -766,7 +771,7 @@ static int __devinit fimc_md_probe(struct platform_device *pdev)
 	ret = v4l2_device_register(&pdev->dev, &fmd->v4l2_dev);
 	if (ret < 0) {
 		v4l2_err(v4l2_dev, "Failed to register v4l2_device: %d\n", ret);
-		goto err1;
+		return ret;
 	}
 	ret = media_device_register(&fmd->media_dev);
 	if (ret < 0) {
@@ -782,9 +787,11 @@ static int __devinit fimc_md_probe(struct platform_device *pdev)
 	if (ret)
 		goto err3;
 
-	ret = fimc_md_register_sensor_entities(fmd);
-	if (ret)
-		goto err3;
+	if (pdev->dev.platform_data) {
+		ret = fimc_md_register_sensor_entities(fmd);
+		if (ret)
+			goto err3;
+	}
 	ret = fimc_md_create_links(fmd);
 	if (ret)
 		goto err3;
@@ -806,8 +813,6 @@ err3:
 	fimc_md_unregister_entities(fmd);
 err2:
 	v4l2_device_unregister(&fmd->v4l2_dev);
-err1:
-	kfree(fmd);
 	return ret;
 }
 
@@ -821,7 +826,6 @@ static int __devexit fimc_md_remove(struct platform_device *pdev)
 	fimc_md_unregister_entities(fmd);
 	media_device_unregister(&fmd->media_dev);
 	fimc_md_put_clocks(fmd);
-	kfree(fmd);
 	return 0;
 }
 

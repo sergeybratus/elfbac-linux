@@ -15,8 +15,8 @@
 #define	DEFAULT_PRIORITY	5
 
 /*
- * Mark IPIs as higher priority so we can take them inside interrupts that
- * arent marked IRQF_DISABLED
+ * Mark IPIs as higher priority so we can take them inside interrupts
+ * FIXME: still true now?
  */
 #define IPI_PRIORITY		4
 
@@ -86,7 +86,7 @@ struct ics {
 extern unsigned int xics_default_server;
 extern unsigned int xics_default_distrib_server;
 extern unsigned int xics_interrupt_server_size;
-extern struct irq_host *xics_host;
+extern struct irq_domain *xics_host;
 
 struct xics_cppr {
 	unsigned char stack[MAX_NUM_PRIORITIES];

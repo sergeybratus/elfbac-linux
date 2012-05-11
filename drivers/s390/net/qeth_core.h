@@ -236,8 +236,7 @@ static inline int qeth_is_ipa_enabled(struct qeth_ipa_info *ipa,
 #define QETH_IN_BUF_COUNT_MAX 128
 #define QETH_MAX_BUFFER_ELEMENTS(card) ((card)->qdio.in_buf_size >> 12)
 #define QETH_IN_BUF_REQUEUE_THRESHOLD(card) \
-		((card)->ssqd.qdioac1 & AC1_SIGA_INPUT_NEEDED ? 1 : \
-		 ((card)->qdio.in_buf_pool.buf_count / 2))
+		 ((card)->qdio.in_buf_pool.buf_count / 2)
 
 /* buffers we have to be behind before we get a PCI */
 #define QETH_PCI_THRESHOLD_A(card) ((card)->qdio.in_buf_pool.buf_count+1)
@@ -907,6 +906,7 @@ void qeth_prepare_ipa_cmd(struct qeth_card *, struct qeth_cmd_buffer *, char);
 struct qeth_cmd_buffer *qeth_wait_for_buffer(struct qeth_channel *);
 int qeth_mdio_read(struct net_device *, int, int);
 int qeth_snmp_command(struct qeth_card *, char __user *);
+int qeth_query_oat_command(struct qeth_card *, char __user *);
 struct qeth_cmd_buffer *qeth_get_adapter_cmd(struct qeth_card *, __u32, __u32);
 int qeth_default_setadapterparms_cb(struct qeth_card *, struct qeth_reply *,
 					unsigned long);

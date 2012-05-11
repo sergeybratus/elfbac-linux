@@ -29,6 +29,7 @@
 #define VMWGFX_KMS_H_
 
 #include "drmP.h"
+#include "drm_crtc_helper.h"
 #include "vmwgfx_drv.h"
 
 #define VMWGFX_NUM_DISPLAY_UNITS 8
@@ -62,8 +63,13 @@ struct vmw_framebuffer {
 int vmw_cursor_update_image(struct vmw_private *dev_priv,
 			    u32 *image, u32 width, u32 height,
 			    u32 hotspotX, u32 hotspotY);
+int vmw_cursor_update_dmabuf(struct vmw_private *dev_priv,
+			     struct vmw_dma_buffer *dmabuf,
+			     u32 width, u32 height,
+			     u32 hotspotX, u32 hotspotY);
 void vmw_cursor_update_position(struct vmw_private *dev_priv,
 				bool show, int x, int y);
+
 
 /**
  * Base class display unit.
@@ -115,6 +121,9 @@ struct vmw_display_unit {
  * Shared display unit functions - vmwgfx_kms.c
  */
 void vmw_display_unit_cleanup(struct vmw_display_unit *du);
+int vmw_du_page_flip(struct drm_crtc *crtc,
+		     struct drm_framebuffer *fb,
+		     struct drm_pending_vblank_event *event);
 void vmw_du_crtc_save(struct drm_crtc *crtc);
 void vmw_du_crtc_restore(struct drm_crtc *crtc);
 void vmw_du_crtc_gamma_set(struct drm_crtc *crtc,
@@ -148,5 +157,10 @@ int vmw_kms_init_screen_object_display(struct vmw_private *dev_priv);
 int vmw_kms_close_screen_object_display(struct vmw_private *dev_priv);
 int vmw_kms_sou_update_layout(struct vmw_private *dev_priv, unsigned num,
 			      struct drm_vmw_rect *rects);
+bool vmw_kms_screen_object_flippable(struct vmw_private *dev_priv,
+				     struct drm_crtc *crtc);
+void vmw_kms_screen_object_update_implicit_fb(struct vmw_private *dev_priv,
+					      struct drm_crtc *crtc);
+
 
 #endif

@@ -33,21 +33,23 @@
 #include <linux/input/sh_keysc.h>
 #include <linux/gpio_keys.h>
 #include <linux/leds.h>
+#include <linux/platform_data/leds-renesas-tpu.h>
 #include <linux/mmc/host.h>
 #include <linux/mmc/sh_mmcif.h>
 #include <linux/mfd/tmio.h>
 #include <linux/mmc/sh_mobile_sdhi.h>
 #include <mach/hardware.h>
+#include <mach/irqs.h>
 #include <mach/sh73a0.h>
 #include <mach/common.h>
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
-#include <asm/mach/map.h>
 #include <asm/mach/time.h>
 #include <asm/hardware/gic.h>
 #include <asm/hardware/cache-l2x0.h>
 #include <asm/traps.h>
 
+/* SMSC 9220 */
 static struct resource smsc9220_resources[] = {
 	[0] = {
 		.start		= 0x14000000, /* CS5A */
@@ -55,7 +57,7 @@ static struct resource smsc9220_resources[] = {
 		.flags		= IORESOURCE_MEM,
 	},
 	[1] = {
-		.start		= gic_spi(33), /* PINTA2 @ PORT144 */
+		.start		= SH73A0_PINT0_IRQ(2), /* PINTA2 */
 		.flags		= IORESOURCE_IRQ,
 	},
 };
@@ -77,6 +79,7 @@ static struct platform_device eth_device = {
 	.num_resources	= ARRAY_SIZE(smsc9220_resources),
 };
 
+/* KEYSC */
 static struct sh_keysc_info keysc_platdata = {
 	.mode		= SH_KEYSC_MODE_6,
 	.scan_timing	= 3,
@@ -120,6 +123,7 @@ static struct platform_device keysc_device = {
 	},
 };
 
+/* GPIO KEY */
 #define GPIO_KEY(c, g, d) { .code = c, .gpio = g, .desc = d, .active_low = 1 }
 
 static struct gpio_keys_button gpio_buttons[] = {
@@ -139,24 +143,20 @@ static struct gpio_keys_button gpio_buttons[] = {
 static struct gpio_keys_platform_data gpio_key_info = {
 	.buttons        = gpio_buttons,
 	.nbuttons       = ARRAY_SIZE(gpio_buttons),
-	.poll_interval  = 250, /* polled for now */
 };
 
 static struct platform_device gpio_keys_device = {
-	.name   = "gpio-keys-polled", /* polled for now */
+	.name   = "gpio-keys",
 	.id     = -1,
 	.dev    = {
 		.platform_data  = &gpio_key_info,
 	},
 };
 
+/* GPIO LED */
 #define GPIO_LED(n, g) { .name = n, .gpio = g }
 
 static struct gpio_led gpio_leds[] = {
-	GPIO_LED("V2513", GPIO_PORT153), /* PORT153 [TPU1T02] -> V2513 */
-	GPIO_LED("V2514", GPIO_PORT199), /* PORT199 [TPU4TO1] -> V2514 */
-	GPIO_LED("V2515", GPIO_PORT197), /* PORT197 [TPU2TO1] -> V2515 */
-	GPIO_LED("KEYLED", GPIO_PORT163), /* PORT163 [TPU3TO0] -> KEYLED */
 	GPIO_LED("G", GPIO_PORT20), /* PORT20 [GPO0] -> LED7 -> "G" */
 	GPIO_LED("H", GPIO_PORT21), /* PORT21 [GPO1] -> LED8 -> "H" */
 	GPIO_LED("J", GPIO_PORT22), /* PORT22 [GPO2] -> LED9 -> "J" */
@@ -175,6 +175,120 @@ static struct platform_device gpio_leds_device = {
 	},
 };
 
+/* TPU LED */
+static struct led_renesas_tpu_config led_renesas_tpu12_pdata = {
+	.name		= "V2513",
+	.pin_gpio_fn	= GPIO_FN_TPU1TO2,
+	.pin_gpio	= GPIO_PORT153,
+	.channel_offset = 0x90,
+	.timer_bit = 2,
+	.max_brightness = 1000,
+};
+
+static struct resource tpu12_resources[] = {
+	[0] = {
+		.name	= "TPU12",
+		.start	= 0xe6610090,
+		.end	= 0xe66100b5,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+static struct platform_device leds_tpu12_device = {
+	.name = "leds-renesas-tpu",
+	.id = 12,
+	.dev = {
+		.platform_data  = &led_renesas_tpu12_pdata,
+	},
+	.num_resources	= ARRAY_SIZE(tpu12_resources),
+	.resource	= tpu12_resources,
+};
+
+static struct led_renesas_tpu_config led_renesas_tpu41_pdata = {
+	.name		= "V2514",
+	.pin_gpio_fn	= GPIO_FN_TPU4TO1,
+	.pin_gpio	= GPIO_PORT199,
+	.channel_offset = 0x50,
+	.timer_bit = 1,
+	.max_brightness = 1000,
+};
+
+static struct resource tpu41_resources[] = {
+	[0] = {
+		.name	= "TPU41",
+		.start	= 0xe6640050,
+		.end	= 0xe6640075,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+static struct platform_device leds_tpu41_device = {
+	.name = "leds-renesas-tpu",
+	.id = 41,
+	.dev = {
+		.platform_data  = &led_renesas_tpu41_pdata,
+	},
+	.num_resources	= ARRAY_SIZE(tpu41_resources),
+	.resource	= tpu41_resources,
+};
+
+static struct led_renesas_tpu_config led_renesas_tpu21_pdata = {
+	.name		= "V2515",
+	.pin_gpio_fn	= GPIO_FN_TPU2TO1,
+	.pin_gpio	= GPIO_PORT197,
+	.channel_offset = 0x50,
+	.timer_bit = 1,
+	.max_brightness = 1000,
+};
+
+static struct resource tpu21_resources[] = {
+	[0] = {
+		.name	= "TPU21",
+		.start	= 0xe6620050,
+		.end	= 0xe6620075,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+static struct platform_device leds_tpu21_device = {
+	.name = "leds-renesas-tpu",
+	.id = 21,
+	.dev = {
+		.platform_data  = &led_renesas_tpu21_pdata,
+	},
+	.num_resources	= ARRAY_SIZE(tpu21_resources),
+	.resource	= tpu21_resources,
+};
+
+static struct led_renesas_tpu_config led_renesas_tpu30_pdata = {
+	.name		= "KEYLED",
+	.pin_gpio_fn	= GPIO_FN_TPU3TO0,
+	.pin_gpio	= GPIO_PORT163,
+	.channel_offset = 0x10,
+	.timer_bit = 0,
+	.max_brightness = 1000,
+};
+
+static struct resource tpu30_resources[] = {
+	[0] = {
+		.name	= "TPU30",
+		.start	= 0xe6630010,
+		.end	= 0xe6630035,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+static struct platform_device leds_tpu30_device = {
+	.name = "leds-renesas-tpu",
+	.id = 30,
+	.dev = {
+		.platform_data  = &led_renesas_tpu30_pdata,
+	},
+	.num_resources	= ARRAY_SIZE(tpu30_resources),
+	.resource	= tpu30_resources,
+};
+
+/* MMCIF */
 static struct resource mmcif_resources[] = {
 	[0] = {
 		.name   = "MMCIF",
@@ -207,6 +321,7 @@ static struct platform_device mmcif_device = {
 	.resource       = mmcif_resources,
 };
 
+/* SDHI0 */
 static struct sh_mobile_sdhi_info sdhi0_info = {
 	.tmio_caps      = MMC_CAP_SD_HIGHSPEED,
 	.tmio_flags     = TMIO_MMC_WRPROTECT_DISABLE | TMIO_MMC_HAS_IDLE_WAIT,
@@ -243,6 +358,7 @@ static struct platform_device sdhi0_device = {
 	},
 };
 
+/* SDHI1 */
 static struct sh_mobile_sdhi_info sdhi1_info = {
 	.tmio_caps      = MMC_CAP_NONREMOVABLE | MMC_CAP_SDIO_IRQ,
 	.tmio_flags     = TMIO_MMC_WRPROTECT_DISABLE | TMIO_MMC_HAS_IDLE_WAIT,
@@ -284,43 +400,14 @@ static struct platform_device *kota2_devices[] __initdata = {
 	&keysc_device,
 	&gpio_keys_device,
 	&gpio_leds_device,
+	&leds_tpu12_device,
+	&leds_tpu41_device,
+	&leds_tpu21_device,
+	&leds_tpu30_device,
 	&mmcif_device,
 	&sdhi0_device,
 	&sdhi1_device,
 };
-
-static struct map_desc kota2_io_desc[] __initdata = {
-	/* create a 1:1 entity map for 0xe6xxxxxx
-	 * used by CPGA, INTC and PFC.
-	 */
-	{
-		.virtual	= 0xe6000000,
-		.pfn		= __phys_to_pfn(0xe6000000),
-		.length		= 256 << 20,
-		.type		= MT_DEVICE_NONSHARED
-	},
-};
-
-static void __init kota2_map_io(void)
-{
-	iotable_init(kota2_io_desc, ARRAY_SIZE(kota2_io_desc));
-
-	/* setup early devices and console here as well */
-	sh73a0_add_early_devices();
-	shmobile_setup_console();
-}
-
-#define PINTER0A	0xe69000a0
-#define PINTCR0A	0xe69000b0
-
-void __init kota2_init_irq(void)
-{
-	sh73a0_init_irq();
-
-	/* setup PINT: enable PINTA2 as active low */
-	__raw_writel(1 << 29, PINTER0A);
-	__raw_writew(2 << 10, PINTCR0A);
-}
 
 static void __init kota2_init(void)
 {
@@ -421,27 +508,18 @@ static void __init kota2_init(void)
 
 #ifdef CONFIG_CACHE_L2X0
 	/* Early BRESP enable, Shared attribute override enable, 64K*8way */
-	l2x0_init(__io(0xf0100000), 0x40460000, 0x82000fff);
+	l2x0_init(IOMEM(0xf0100000), 0x40460000, 0x82000fff);
 #endif
 	sh73a0_add_standard_devices();
 	platform_add_devices(kota2_devices, ARRAY_SIZE(kota2_devices));
 }
 
-static void __init kota2_timer_init(void)
-{
-	sh73a0_clock_init();
-	shmobile_timer.init();
-	return;
-}
-
-struct sys_timer kota2_timer = {
-	.init	= kota2_timer_init,
-};
-
 MACHINE_START(KOTA2, "kota2")
-	.map_io		= kota2_map_io,
-	.init_irq	= kota2_init_irq,
-	.handle_irq	= shmobile_handle_irq_gic,
+	.map_io		= sh73a0_map_io,
+	.init_early	= sh73a0_add_early_devices,
+	.nr_irqs	= NR_IRQS_LEGACY,
+	.init_irq	= sh73a0_init_irq,
+	.handle_irq	= gic_handle_irq,
 	.init_machine	= kota2_init,
-	.timer		= &kota2_timer,
+	.timer		= &shmobile_timer,
 MACHINE_END

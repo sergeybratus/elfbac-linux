@@ -20,12 +20,12 @@
 
 #include <linux/err.h>
 #include <linux/sched.h>
-#include <linux/device.h>
 
 /* hwspinlock mode argument */
 #define HWLOCK_IRQSTATE	0x01	/* Disable interrupts, save state */
 #define HWLOCK_IRQ	0x02	/* Disable interrupts, don't save state */
 
+struct device;
 struct hwspinlock;
 struct hwspinlock_device;
 struct hwspinlock_ops;
@@ -118,7 +118,6 @@ int __hwspin_trylock(struct hwspinlock *hwlock, int mode, unsigned long *flags)
 static inline
 void __hwspin_unlock(struct hwspinlock *hwlock, int mode, unsigned long *flags)
 {
-	return 0;
 }
 
 static inline int hwspin_lock_get_id(struct hwspinlock *hwlock)

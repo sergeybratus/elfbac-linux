@@ -48,7 +48,7 @@ intel_fixed_panel_mode(struct drm_display_mode *fixed_mode,
 
 	adjusted_mode->clock = fixed_mode->clock;
 
-	drm_mode_set_crtcinfo(adjusted_mode, CRTC_INTERLACE_HALVE_V);
+	drm_mode_set_crtcinfo(adjusted_mode, 0);
 }
 
 /* adjusted_mode has been preset to be the panel's fixed mode */
@@ -141,8 +141,8 @@ static u32 i915_read_blc_pwm_ctl(struct drm_i915_private *dev_priv)
 			dev_priv->saveBLC_PWM_CTL2 = val;
 		} else if (val == 0) {
 			I915_WRITE(BLC_PWM_PCH_CTL2,
-				   dev_priv->saveBLC_PWM_CTL);
-			val = dev_priv->saveBLC_PWM_CTL;
+				   dev_priv->saveBLC_PWM_CTL2);
+			val = dev_priv->saveBLC_PWM_CTL2;
 		}
 	} else {
 		val = I915_READ(BLC_PWM_CTL);
@@ -178,13 +178,10 @@ u32 intel_panel_get_max_backlight(struct drm_device *dev)
 	if (HAS_PCH_SPLIT(dev)) {
 		max >>= 16;
 	} else {
-		if (IS_PINEVIEW(dev)) {
+		if (INTEL_INFO(dev)->gen < 4)
 			max >>= 17;
-		} else {
+		else
 			max >>= 16;
-			if (INTEL_INFO(dev)->gen < 4)
-				max &= ~1;
-		}
 
 		if (is_backlight_combination_mode(dev))
 			max *= 0xff;
@@ -203,13 +200,12 @@ u32 intel_panel_get_backlight(struct drm_device *dev)
 		val = I915_READ(BLC_PWM_CPU_CTL) & BACKLIGHT_DUTY_CYCLE_MASK;
 	} else {
 		val = I915_READ(BLC_PWM_CTL) & BACKLIGHT_DUTY_CYCLE_MASK;
-		if (IS_PINEVIEW(dev))
+		if (INTEL_INFO(dev)->gen < 4)
 			val >>= 1;
 
 		if (is_backlight_combination_mode(dev)) {
 			u8 lbpc;
 
-			val &= ~1;
 			pci_read_config_byte(dev->pdev, PCI_LBPC, &lbpc);
 			val *= lbpc;
 		}
@@ -246,11 +242,9 @@ static void intel_panel_actually_set_backlight(struct drm_device *dev, u32 level
 	}
 
 	tmp = I915_READ(BLC_PWM_CTL);
-	if (IS_PINEVIEW(dev)) {
-		tmp &= ~(BACKLIGHT_DUTY_CYCLE_MASK - 1);
+	if (INTEL_INFO(dev)->gen < 4) 
 		level <<= 1;
-	} else
-		tmp &= ~BACKLIGHT_DUTY_CYCLE_MASK;
+	tmp &= ~BACKLIGHT_DUTY_CYCLE_MASK;
 	I915_WRITE(BLC_PWM_CTL, tmp | level);
 }
 
@@ -326,7 +320,8 @@ static int intel_panel_update_status(struct backlight_device *bd)
 static int intel_panel_get_brightness(struct backlight_device *bd)
 {
 	struct drm_device *dev = bl_get_data(bd);
-	return intel_panel_get_backlight(dev);
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	return dev_priv->backlight_level;
 }
 
 static const struct backlight_ops intel_panel_bl_ops = {

@@ -20,8 +20,8 @@ static int diag_release_pages(struct kvm_vcpu *vcpu)
 	unsigned long start, end;
 	unsigned long prefix  = vcpu->arch.sie_block->prefix;
 
-	start = vcpu->arch.guest_gprs[(vcpu->arch.sie_block->ipa & 0xf0) >> 4];
-	end = vcpu->arch.guest_gprs[vcpu->arch.sie_block->ipa & 0xf] + 4096;
+	start = vcpu->run->s.regs.gprs[(vcpu->arch.sie_block->ipa & 0xf0) >> 4];
+	end = vcpu->run->s.regs.gprs[vcpu->arch.sie_block->ipa & 0xf] + 4096;
 
 	if (start & ~PAGE_MASK || end & ~PAGE_MASK || start > end
 	    || start < 2 * PAGE_SIZE)
@@ -56,7 +56,7 @@ static int __diag_time_slice_end(struct kvm_vcpu *vcpu)
 static int __diag_ipl_functions(struct kvm_vcpu *vcpu)
 {
 	unsigned int reg = vcpu->arch.sie_block->ipa & 0xf;
-	unsigned long subcode = vcpu->arch.guest_gprs[reg] & 0xffff;
+	unsigned long subcode = vcpu->run->s.regs.gprs[reg] & 0xffff;
 
 	VCPU_EVENT(vcpu, 5, "diag ipl functions, subcode %lx", subcode);
 	switch (subcode) {
@@ -70,7 +70,7 @@ static int __diag_ipl_functions(struct kvm_vcpu *vcpu)
 		return -EOPNOTSUPP;
 	}
 
-	atomic_clear_mask(CPUSTAT_RUNNING, &vcpu->arch.sie_block->cpuflags);
+	atomic_set_mask(CPUSTAT_STOPPED, &vcpu->arch.sie_block->cpuflags);
 	vcpu->run->s390_reset_flags |= KVM_S390_RESET_SUBSYSTEM;
 	vcpu->run->s390_reset_flags |= KVM_S390_RESET_IPL;
 	vcpu->run->s390_reset_flags |= KVM_S390_RESET_CPU_INIT;

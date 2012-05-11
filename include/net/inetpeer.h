@@ -40,6 +40,7 @@ struct inet_peer {
 	u32			pmtu_orig;
 	u32			pmtu_learned;
 	struct inetpeer_addr_base redirect_learned;
+	struct list_head	gc_list;
 	/*
 	 * Once inet_peer is queued for deletion (refcnt == -1), following fields
 	 * are not available: rid, ip_id_count, tcp_ts, tcp_ts_stamp
@@ -86,7 +87,7 @@ static inline struct inet_peer *inet_getpeer_v6(const struct in6_addr *v6daddr, 
 {
 	struct inetpeer_addr daddr;
 
-	ipv6_addr_copy((struct in6_addr *)daddr.addr.a6, v6daddr);
+	*(struct in6_addr *)daddr.addr.a6 = *v6daddr;
 	daddr.family = AF_INET6;
 	return inet_getpeer(&daddr, create);
 }
@@ -94,6 +95,8 @@ static inline struct inet_peer *inet_getpeer_v6(const struct in6_addr *v6daddr, 
 /* can be called from BH context or outside */
 extern void inet_putpeer(struct inet_peer *p);
 extern bool inet_peer_xrlim_allow(struct inet_peer *peer, int timeout);
+
+extern void inetpeer_invalidate_tree(int family);
 
 /*
  * temporary check to make sure we dont access rid, ip_id_count, tcp_ts,

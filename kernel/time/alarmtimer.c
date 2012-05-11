@@ -96,6 +96,11 @@ static int alarmtimer_rtc_add_device(struct device *dev,
 	return 0;
 }
 
+static inline void alarmtimer_rtc_timer_init(void)
+{
+	rtc_timer_init(&rtctimer, NULL, NULL);
+}
+
 static struct class_interface alarmtimer_rtc_interface = {
 	.add_dev = &alarmtimer_rtc_add_device,
 };
@@ -117,6 +122,7 @@ static inline struct rtc_device *alarmtimer_get_rtcdev(void)
 #define rtcdev (NULL)
 static inline int alarmtimer_rtc_interface_setup(void) { return 0; }
 static inline void alarmtimer_rtc_interface_remove(void) { }
+static inline void alarmtimer_rtc_timer_init(void) { }
 #endif
 
 /**
@@ -195,7 +201,7 @@ static enum hrtimer_restart alarmtimer_fired(struct hrtimer *timer)
 		struct alarm *alarm;
 		ktime_t expired = next->expires;
 
-		if (expired.tv64 >= now.tv64)
+		if (expired.tv64 > now.tv64)
 			break;
 
 		alarm = container_of(next, struct alarm, node);
@@ -782,6 +788,8 @@ static int __init alarmtimer_init(void)
 		.timer_get	= alarm_timer_get,
 		.nsleep		= alarm_timer_nsleep,
 	};
+
+	alarmtimer_rtc_timer_init();
 
 	posix_timers_register_clock(CLOCK_REALTIME_ALARM, &alarm_clock);
 	posix_timers_register_clock(CLOCK_BOOTTIME_ALARM, &alarm_clock);

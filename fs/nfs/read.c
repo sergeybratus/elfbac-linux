@@ -20,7 +20,6 @@
 #include <linux/nfs_page.h>
 #include <linux/module.h>
 
-#include <asm/system.h>
 #include "pnfs.h"
 
 #include "nfs4_fs.h"
@@ -66,7 +65,6 @@ void nfs_readdata_free(struct nfs_read_data *p)
 
 void nfs_readdata_release(struct nfs_read_data *rdata)
 {
-	put_lseg(rdata->lseg);
 	put_nfs_open_context(rdata->args.context);
 	nfs_readdata_free(rdata);
 }
@@ -109,7 +107,7 @@ static void nfs_readpage_truncate_uninitialised_page(struct nfs_read_data *data)
 	}
 }
 
-static void nfs_pageio_init_read_mds(struct nfs_pageio_descriptor *pgio,
+void nfs_pageio_init_read_mds(struct nfs_pageio_descriptor *pgio,
 		struct inode *inode)
 {
 	nfs_pageio_init(pgio, inode, &nfs_pageio_read_ops,
@@ -465,23 +463,14 @@ static void nfs_readpage_release_partial(void *calldata)
 	nfs_readdata_release(calldata);
 }
 
-#if defined(CONFIG_NFS_V4_1)
 void nfs_read_prepare(struct rpc_task *task, void *calldata)
 {
 	struct nfs_read_data *data = calldata;
-
-	if (nfs4_setup_sequence(NFS_SERVER(data->inode),
-				&data->args.seq_args, &data->res.seq_res,
-				0, task))
-		return;
-	rpc_call_start(task);
+	NFS_PROTO(data->inode)->read_rpc_prepare(task, data);
 }
-#endif /* CONFIG_NFS_V4_1 */
 
 static const struct rpc_call_ops nfs_read_partial_ops = {
-#if defined(CONFIG_NFS_V4_1)
 	.rpc_call_prepare = nfs_read_prepare,
-#endif /* CONFIG_NFS_V4_1 */
 	.rpc_call_done = nfs_readpage_result_partial,
 	.rpc_release = nfs_readpage_release_partial,
 };
@@ -534,30 +523,18 @@ static void nfs_readpage_result_full(struct rpc_task *task, void *calldata)
 static void nfs_readpage_release_full(void *calldata)
 {
 	struct nfs_read_data *data = calldata;
-	struct nfs_pageio_descriptor pgio;
 
-	if (data->pnfs_error) {
-		nfs_pageio_init_read_mds(&pgio, data->inode);
-		pgio.pg_recoalesce = 1;
-	}
 	while (!list_empty(&data->pages)) {
 		struct nfs_page *req = nfs_list_entry(data->pages.next);
 
 		nfs_list_remove_request(req);
-		if (!data->pnfs_error)
-			nfs_readpage_release(req);
-		else
-			nfs_pageio_add_request(&pgio, req);
+		nfs_readpage_release(req);
 	}
-	if (data->pnfs_error)
-		nfs_pageio_complete(&pgio);
 	nfs_readdata_release(calldata);
 }
 
 static const struct rpc_call_ops nfs_read_full_ops = {
-#if defined(CONFIG_NFS_V4_1)
 	.rpc_call_prepare = nfs_read_prepare,
-#endif /* CONFIG_NFS_V4_1 */
 	.rpc_call_done = nfs_readpage_result_full,
 	.rpc_release = nfs_readpage_release_full,
 };

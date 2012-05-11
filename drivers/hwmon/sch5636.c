@@ -1,5 +1,5 @@
 /***************************************************************************
- *   Copyright (C) 2011 Hans de Goede <hdegoede@redhat.com>                *
+ *   Copyright (C) 2011-2012 Hans de Goede <hdegoede@redhat.com>           *
  *                                                                         *
  *   This program is free software; you can redistribute it and/or modify  *
  *   it under the terms of the GNU General Public License as published by  *
@@ -67,6 +67,7 @@ static const u16 SCH5636_REG_FAN_VAL[SCH5636_NO_FANS] = {
 struct sch5636_data {
 	unsigned short addr;
 	struct device *hwmon_dev;
+	struct sch56xx_watchdog_data *watchdog;
 
 	struct mutex update_lock;
 	char valid;			/* !=0 if following fields are valid */
@@ -384,6 +385,9 @@ static int sch5636_remove(struct platform_device *pdev)
 	struct sch5636_data *data = platform_get_drvdata(pdev);
 	int i;
 
+	if (data->watchdog)
+		sch56xx_watchdog_unregister(data->watchdog);
+
 	if (data->hwmon_dev)
 		hwmon_device_unregister(data->hwmon_dev);
 
@@ -505,6 +509,11 @@ static int __devinit sch5636_probe(struct platform_device *pdev)
 		goto error;
 	}
 
+	/* Note failing to register the watchdog is not a fatal error */
+	data->watchdog = sch56xx_watchdog_register(data->addr,
+					(revision[0] << 8) | revision[1],
+					&data->update_lock, 0);
+
 	return 0;
 
 error:
@@ -521,19 +530,8 @@ static struct platform_driver sch5636_driver = {
 	.remove		= sch5636_remove,
 };
 
-static int __init sch5636_init(void)
-{
-	return platform_driver_register(&sch5636_driver);
-}
-
-static void __exit sch5636_exit(void)
-{
-	platform_driver_unregister(&sch5636_driver);
-}
+module_platform_driver(sch5636_driver);
 
 MODULE_DESCRIPTION("SMSC SCH5636 Hardware Monitoring Driver");
 MODULE_AUTHOR("Hans de Goede <hdegoede@redhat.com>");
 MODULE_LICENSE("GPL");
-
-module_init(sch5636_init);
-module_exit(sch5636_exit);

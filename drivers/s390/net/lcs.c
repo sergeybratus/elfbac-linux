@@ -50,7 +50,7 @@
 #include "lcs.h"
 
 
-#if !defined(CONFIG_NET_ETHERNET) && \
+#if !defined(CONFIG_ETHERNET) && \
     !defined(CONFIG_TR) && !defined(CONFIG_FDDI)
 #error Cannot compile lcs.c without some net devices switched on.
 #endif
@@ -1634,7 +1634,7 @@ lcs_startlan_auto(struct lcs_card *card)
 	int rc;
 
 	LCS_DBF_TEXT(2, trace, "strtauto");
-#ifdef CONFIG_NET_ETHERNET
+#ifdef CONFIG_ETHERNET
 	card->lan_type = LCS_FRAME_TYPE_ENET;
 	rc = lcs_send_startlan(card, LCS_INITIATOR_TCPIP);
 	if (rc == 0)
@@ -2166,7 +2166,7 @@ lcs_new_device(struct ccwgroup_device *ccwgdev)
 		goto netdev_out;
 	}
 	switch (card->lan_type) {
-#ifdef CONFIG_NET_ETHERNET
+#ifdef CONFIG_ETHERNET
 	case LCS_FRAME_TYPE_ENET:
 		card->lan_type_trans = eth_type_trans;
 		dev = alloc_etherdev(0);
@@ -2240,7 +2240,7 @@ __lcs_shutdown_device(struct ccwgroup_device *ccwgdev, int recovery_mode)
 {
 	struct lcs_card *card;
 	enum lcs_dev_states recover_state;
-	int ret;
+	int ret = 0, ret2 = 0, ret3 = 0;
 
 	LCS_DBF_TEXT(3, setup, "shtdndev");
 	card = dev_get_drvdata(&ccwgdev->dev);
@@ -2255,13 +2255,15 @@ __lcs_shutdown_device(struct ccwgroup_device *ccwgdev, int recovery_mode)
 	recover_state = card->state;
 
 	ret = lcs_stop_device(card->dev);
-	ret = ccw_device_set_offline(card->read.ccwdev);
-	ret = ccw_device_set_offline(card->write.ccwdev);
+	ret2 = ccw_device_set_offline(card->read.ccwdev);
+	ret3 = ccw_device_set_offline(card->write.ccwdev);
+	if (!ret)
+		ret = (ret2) ? ret2 : ret3;
+	if (ret)
+		LCS_DBF_TEXT_(3, setup, "1err:%d", ret);
 	if (recover_state == DEV_STATE_UP) {
 		card->state = DEV_STATE_RECOVER;
 	}
-	if (ret)
-		return ret;
 	return 0;
 }
 

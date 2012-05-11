@@ -34,9 +34,9 @@ static char *serial_version = "$Revision: 1.25 $";
 
 #include <asm/irq.h>
 #include <asm/dma.h>
-#include <asm/system.h>
 
 #include <arch/svinto.h>
+#include <arch/system.h>
 
 /* non-arch dependent serial structures are in linux/serial.h */
 #include <linux/serial.h>
@@ -3234,9 +3234,8 @@ rs_write(struct tty_struct *tty,
 		e100_disable_rx(info);
 		e100_enable_rx_irq(info);
 #endif
-		if ((info->rs485.flags & SER_RS485_RTS_BEFORE_SEND) &&
-			(info->rs485.delay_rts_before_send > 0))
-				msleep(info->rs485.delay_rts_before_send);
+		if (info->rs485.delay_rts_before_send > 0)
+			msleep(info->rs485.delay_rts_before_send);
 	}
 #endif /* CONFIG_ETRAX_RS485 */
 
@@ -3693,10 +3692,6 @@ rs_ioctl(struct tty_struct *tty,
 
 		rs485data.delay_rts_before_send = rs485ctrl.delay_rts_before_send;
 		rs485data.flags = 0;
-		if (rs485data.delay_rts_before_send != 0)
-			rs485data.flags |= SER_RS485_RTS_BEFORE_SEND;
-		else
-			rs485data.flags &= ~(SER_RS485_RTS_BEFORE_SEND);
 
 		if (rs485ctrl.enabled)
 			rs485data.flags |= SER_RS485_ENABLED;
@@ -4110,20 +4105,11 @@ static int
 rs_open(struct tty_struct *tty, struct file * filp)
 {
 	struct e100_serial	*info;
-	int 			retval, line;
+	int 			retval;
 	unsigned long           page;
 	int                     allocated_resources = 0;
 
-	/* find which port we want to open */
-	line = tty->index;
-
-	if (line < 0 || line >= NR_PORTS)
-		return -ENODEV;
-
-	/* find the corresponding e100_serial struct in the table */
-	info = rs_table + line;
-
-	/* don't allow the opening of ports that are not enabled in the HW config */
+	info = rs_table + tty->index;
 	if (!info->enabled)
 		return -ENODEV;
 
@@ -4136,7 +4122,7 @@ rs_open(struct tty_struct *tty, struct file * filp)
 	tty->driver_data = info;
 	info->port.tty = tty;
 
-	info->port.tty->low_latency = (info->flags & ASYNC_LOW_LATENCY) ? 1 : 0;
+	tty->low_latency = !!(info->flags & ASYNC_LOW_LATENCY);
 
 	if (!tmp_buf) {
 		page = get_zeroed_page(GFP_KERNEL);
@@ -4531,7 +4517,6 @@ static int __init rs_init(void)
 		/* Set sane defaults */
 		info->rs485.flags &= ~(SER_RS485_RTS_ON_SEND);
 		info->rs485.flags |= SER_RS485_RTS_AFTER_SEND;
-		info->rs485.flags &= ~(SER_RS485_RTS_BEFORE_SEND);
 		info->rs485.delay_rts_before_send = 0;
 		info->rs485.flags &= ~(SER_RS485_ENABLED);
 #endif

@@ -59,8 +59,7 @@ armpmu_get_pmu_id(void)
 }
 EXPORT_SYMBOL_GPL(armpmu_get_pmu_id);
 
-int
-armpmu_get_max_events(void)
+int perf_num_counters(void)
 {
 	int max_events = 0;
 
@@ -68,12 +67,6 @@ armpmu_get_max_events(void)
 		max_events = cpu_pmu->num_events;
 
 	return max_events;
-}
-EXPORT_SYMBOL_GPL(armpmu_get_max_events);
-
-int perf_num_counters(void)
-{
-	return armpmu_get_max_events();
 }
 EXPORT_SYMBOL_GPL(perf_num_counters);
 
@@ -187,7 +180,7 @@ armpmu_event_set_period(struct perf_event *event,
 u64
 armpmu_event_update(struct perf_event *event,
 		    struct hw_perf_event *hwc,
-		    int idx, int overflow)
+		    int idx)
 {
 	struct arm_pmu *armpmu = to_arm_pmu(event->pmu);
 	u64 delta, prev_raw_count, new_raw_count;
@@ -200,13 +193,7 @@ again:
 			     new_raw_count) != prev_raw_count)
 		goto again;
 
-	new_raw_count &= armpmu->max_period;
-	prev_raw_count &= armpmu->max_period;
-
-	if (overflow)
-		delta = armpmu->max_period - prev_raw_count + new_raw_count + 1;
-	else
-		delta = new_raw_count - prev_raw_count;
+	delta = (new_raw_count - prev_raw_count) & armpmu->max_period;
 
 	local64_add(delta, &event->count);
 	local64_sub(delta, &hwc->period_left);
@@ -223,7 +210,7 @@ armpmu_read(struct perf_event *event)
 	if (hwc->idx < 0)
 		return;
 
-	armpmu_event_update(event, hwc, hwc->idx, 0);
+	armpmu_event_update(event, hwc, hwc->idx);
 }
 
 static void
@@ -239,7 +226,7 @@ armpmu_stop(struct perf_event *event, int flags)
 	if (!(hwc->state & PERF_HES_STOPPED)) {
 		armpmu->disable(hwc, hwc->idx);
 		barrier(); /* why? */
-		armpmu_event_update(event, hwc, hwc->idx, 0);
+		armpmu_event_update(event, hwc, hwc->idx);
 		hwc->state |= PERF_HES_STOPPED | PERF_HES_UPTODATE;
 	}
 }
@@ -343,19 +330,25 @@ validate_group(struct perf_event *event)
 {
 	struct perf_event *sibling, *leader = event->group_leader;
 	struct pmu_hw_events fake_pmu;
+	DECLARE_BITMAP(fake_used_mask, ARMPMU_MAX_HWEVENTS);
 
-	memset(&fake_pmu, 0, sizeof(fake_pmu));
+	/*
+	 * Initialise the fake PMU. We only need to populate the
+	 * used_mask for the purposes of validation.
+	 */
+	memset(fake_used_mask, 0, sizeof(fake_used_mask));
+	fake_pmu.used_mask = fake_used_mask;
 
 	if (!validate_event(&fake_pmu, leader))
-		return -ENOSPC;
+		return -EINVAL;
 
 	list_for_each_entry(sibling, &leader->sibling_list, group_entry) {
 		if (!validate_event(&fake_pmu, sibling))
-			return -ENOSPC;
+			return -EINVAL;
 	}
 
 	if (!validate_event(&fake_pmu, event))
-		return -ENOSPC;
+		return -EINVAL;
 
 	return 0;
 }
@@ -374,6 +367,8 @@ armpmu_release_hardware(struct arm_pmu *armpmu)
 {
 	int i, irq, irqs;
 	struct platform_device *pmu_device = armpmu->plat_device;
+	struct arm_pmu_platdata *plat =
+		dev_get_platdata(&pmu_device->dev);
 
 	irqs = min(pmu_device->num_resources, num_possible_cpus());
 
@@ -381,8 +376,11 @@ armpmu_release_hardware(struct arm_pmu *armpmu)
 		if (!cpumask_test_and_clear_cpu(i, &armpmu->active_irqs))
 			continue;
 		irq = platform_get_irq(pmu_device, i);
-		if (irq >= 0)
+		if (irq >= 0) {
+			if (plat && plat->disable_irq)
+				plat->disable_irq(irq);
 			free_irq(irq, armpmu);
+		}
 	}
 
 	release_pmu(armpmu->type);
@@ -395,6 +393,9 @@ armpmu_reserve_hardware(struct arm_pmu *armpmu)
 	irq_handler_t handle_irq;
 	int i, err, irq, irqs;
 	struct platform_device *pmu_device = armpmu->plat_device;
+
+	if (!pmu_device)
+		return -ENODEV;
 
 	err = reserve_pmu(armpmu->type);
 	if (err) {
@@ -439,7 +440,8 @@ armpmu_reserve_hardware(struct arm_pmu *armpmu)
 				irq);
 			armpmu_release_hardware(armpmu);
 			return err;
-		}
+		} else if (plat && plat->enable_irq)
+			plat->enable_irq(irq);
 
 		cpumask_set_cpu(i, &armpmu->active_irqs);
 	}
@@ -510,7 +512,13 @@ __hw_perf_event_init(struct perf_event *event)
 	hwc->config_base	    |= (unsigned long)mapping;
 
 	if (!hwc->sample_period) {
-		hwc->sample_period  = armpmu->max_period;
+		/*
+		 * For non-sampling runs, limit the sample_period to half
+		 * of the counter width. That way, the new counter value
+		 * is far less likely to overtake the previous one unless
+		 * you have some serious IRQ latency issues.
+		 */
+		hwc->sample_period  = armpmu->max_period >> 1;
 		hwc->last_period    = hwc->sample_period;
 		local64_set(&hwc->period_left, hwc->sample_period);
 	}
@@ -530,6 +538,10 @@ static int armpmu_event_init(struct perf_event *event)
 	struct arm_pmu *armpmu = to_arm_pmu(event->pmu);
 	int err = 0;
 	atomic_t *active_events = &armpmu->active_events;
+
+	/* does not support taken branch sampling */
+	if (has_branch_stack(event))
+		return -EOPNOTSUPP;
 
 	if (armpmu->map_event(event) == -ENOENT)
 		return -ENOENT;
@@ -631,6 +643,9 @@ static struct platform_device_id armpmu_plat_device_ids[] = {
 
 static int __devinit armpmu_device_probe(struct platform_device *pdev)
 {
+	if (!cpu_pmu)
+		return -ENODEV;
+
 	cpu_pmu->plat_device = pdev;
 	return 0;
 }
@@ -669,6 +684,28 @@ static void __init cpu_pmu_init(struct arm_pmu *armpmu)
 }
 
 /*
+ * PMU hardware loses all context when a CPU goes offline.
+ * When a CPU is hotplugged back in, since some hardware registers are
+ * UNKNOWN at reset, the PMU must be explicitly reset to avoid reading
+ * junk values out of them.
+ */
+static int __cpuinit pmu_cpu_notify(struct notifier_block *b,
+					unsigned long action, void *hcpu)
+{
+	if ((action & ~CPU_TASKS_FROZEN) != CPU_STARTING)
+		return NOTIFY_DONE;
+
+	if (cpu_pmu && cpu_pmu->reset)
+		cpu_pmu->reset(NULL);
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block __cpuinitdata pmu_cpu_notifier = {
+	.notifier_call = pmu_cpu_notify,
+};
+
+/*
  * CPU PMU identification and registration.
  */
 static int __init
@@ -701,6 +738,9 @@ init_hw_perf_events(void)
 		case 0xC0F0:	/* Cortex-A15 */
 			cpu_pmu = armv7_a15_pmu_init();
 			break;
+		case 0xC070:	/* Cortex-A7 */
+			cpu_pmu = armv7_a7_pmu_init();
+			break;
 		}
 	/* Intel CPUs [xscale]. */
 	} else if (0x69 == implementor) {
@@ -719,6 +759,7 @@ init_hw_perf_events(void)
 		pr_info("enabled with %s PMU driver, %d counters available\n",
 			cpu_pmu->name, cpu_pmu->num_events);
 		cpu_pmu_init(cpu_pmu);
+		register_cpu_notifier(&pmu_cpu_notifier);
 		armpmu_register(cpu_pmu, "cpu", PERF_TYPE_RAW);
 	} else {
 		pr_info("no hardware support available\n");

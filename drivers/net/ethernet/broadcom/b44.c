@@ -608,7 +608,7 @@ static void b44_tx(struct b44 *bp)
 				 skb->len,
 				 DMA_TO_DEVICE);
 		rp->skb = NULL;
-		dev_kfree_skb(skb);
+		dev_kfree_skb_irq(skb);
 	}
 
 	bp->tx_cons = cons;
@@ -2138,7 +2138,6 @@ static int __devinit b44_init_one(struct ssb_device *sdev,
 
 	dev = alloc_etherdev(sizeof(*bp));
 	if (!dev) {
-		dev_err(sdev->dev, "Etherdev alloc failed, aborting\n");
 		err = -ENOMEM;
 		goto out;
 	}
@@ -2339,7 +2338,7 @@ static inline int __init b44_pci_init(void)
 	return err;
 }
 
-static inline void __exit b44_pci_exit(void)
+static inline void b44_pci_exit(void)
 {
 #ifdef CONFIG_B44_PCI
 	ssb_pcihost_unregister(&b44_pci_driver);

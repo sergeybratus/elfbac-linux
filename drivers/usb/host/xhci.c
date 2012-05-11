@@ -200,14 +200,14 @@ static int xhci_setup_msi(struct xhci_hcd *xhci)
 
 	ret = pci_enable_msi(pdev);
 	if (ret) {
-		xhci_err(xhci, "failed to allocate MSI entry\n");
+		xhci_dbg(xhci, "failed to allocate MSI entry\n");
 		return ret;
 	}
 
 	ret = request_irq(pdev->irq, (irq_handler_t)xhci_msi_irq,
 				0, "xhci_hcd", xhci_to_hcd(xhci));
 	if (ret) {
-		xhci_err(xhci, "disable MSI interrupt\n");
+		xhci_dbg(xhci, "disable MSI interrupt\n");
 		pci_disable_msi(pdev);
 	}
 
@@ -224,13 +224,13 @@ static void xhci_free_irq(struct xhci_hcd *xhci)
 	int ret;
 
 	/* return if using legacy interrupt */
-	if (xhci_to_hcd(xhci)->irq >= 0)
+	if (xhci_to_hcd(xhci)->irq > 0)
 		return;
 
 	ret = xhci_free_msi(xhci);
 	if (!ret)
 		return;
-	if (pdev->irq >= 0)
+	if (pdev->irq > 0)
 		free_irq(pdev->irq, xhci_to_hcd(xhci));
 
 	return;
@@ -270,7 +270,7 @@ static int xhci_setup_msix(struct xhci_hcd *xhci)
 
 	ret = pci_enable_msix(pdev, xhci->msix_entries, xhci->msix_count);
 	if (ret) {
-		xhci_err(xhci, "Failed to enable MSI-X\n");
+		xhci_dbg(xhci, "Failed to enable MSI-X\n");
 		goto free_entries;
 	}
 
@@ -286,7 +286,7 @@ static int xhci_setup_msix(struct xhci_hcd *xhci)
 	return ret;
 
 disable_msix:
-	xhci_err(xhci, "disable MSI-X interrupt\n");
+	xhci_dbg(xhci, "disable MSI-X interrupt\n");
 	xhci_free_irq(xhci);
 	pci_disable_msix(pdev);
 free_entries:
@@ -341,7 +341,7 @@ static int xhci_try_enable_msi(struct usb_hcd *hcd)
 	/* unregister the legacy interrupt */
 	if (hcd->irq)
 		free_irq(hcd->irq, hcd);
-	hcd->irq = -1;
+	hcd->irq = 0;
 
 	ret = xhci_setup_msix(xhci);
 	if (ret)
@@ -349,8 +349,13 @@ static int xhci_try_enable_msi(struct usb_hcd *hcd)
 		ret = xhci_setup_msi(xhci);
 
 	if (!ret)
-		/* hcd->irq is -1, we have MSI */
+		/* hcd->irq is 0, we have MSI */
 		return 0;
+
+	if (!pdev->irq) {
+		xhci_err(xhci, "No msi-x/msi found and no IRQ in BIOS\n");
+		return -EINVAL;
+	}
 
 	/* fall back to legacy interrupt*/
 	ret = request_irq(pdev->irq, &usb_hcd_irq, IRQF_SHARED,
@@ -711,7 +716,10 @@ static void xhci_clear_command_ring(struct xhci_hcd *xhci)
 	ring = xhci->cmd_ring;
 	seg = ring->deq_seg;
 	do {
-		memset(seg->trbs, 0, SEGMENT_SIZE);
+		memset(seg->trbs, 0,
+			sizeof(union xhci_trb) * (TRBS_PER_SEGMENT - 1));
+		seg->trbs[TRBS_PER_SEGMENT - 1].link.control &=
+			cpu_to_le32(~TRB_CYCLE);
 		seg = seg->next;
 	} while (seg != ring->deq_seg);
 
@@ -721,6 +729,7 @@ static void xhci_clear_command_ring(struct xhci_hcd *xhci)
 	ring->enq_seg = ring->deq_seg;
 	ring->enqueue = ring->dequeue;
 
+	ring->num_trbs_free = ring->num_segs * (TRBS_PER_SEGMENT - 1) - 1;
 	/*
 	 * Ring is now zeroed, so the HW should look for change of ownership
 	 * when the cycle bit is set to 1.
@@ -799,7 +808,7 @@ int xhci_resume(struct xhci_hcd *xhci, bool hibernated)
 	u32			command, temp = 0;
 	struct usb_hcd		*hcd = xhci_to_hcd(xhci);
 	struct usb_hcd		*secondary_hcd;
-	int			retval;
+	int			retval = 0;
 
 	/* Wait a bit if either of the roothubs need to settle from the
 	 * transition into bus suspend.
@@ -808,6 +817,9 @@ int xhci_resume(struct xhci_hcd *xhci, bool hibernated)
 			time_before(jiffies,
 				xhci->bus_state[1].next_statechange))
 		msleep(100);
+
+	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
+	set_bit(HCD_FLAG_HW_ACCESSIBLE, &xhci->shared_hcd->flags);
 
 	spin_lock_irq(&xhci->lock);
 	if (xhci->quirks & XHCI_RESET_ON_RESUME)
@@ -878,20 +890,13 @@ int xhci_resume(struct xhci_hcd *xhci, bool hibernated)
 			return retval;
 		xhci_dbg(xhci, "Start the primary HCD\n");
 		retval = xhci_run(hcd->primary_hcd);
-		if (retval)
-			goto failed_restart;
-
-		xhci_dbg(xhci, "Start the secondary HCD\n");
-		retval = xhci_run(secondary_hcd);
 		if (!retval) {
-			set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
-			set_bit(HCD_FLAG_HW_ACCESSIBLE,
-					&xhci->shared_hcd->flags);
+			xhci_dbg(xhci, "Start the secondary HCD\n");
+			retval = xhci_run(secondary_hcd);
 		}
-failed_restart:
 		hcd->state = HC_STATE_SUSPENDED;
 		xhci->shared_hcd->state = HC_STATE_SUSPENDED;
-		return retval;
+		goto done;
 	}
 
 	/* step 4: set Run/Stop bit */
@@ -910,11 +915,14 @@ failed_restart:
 	 * Running endpoints by ringing their doorbells
 	 */
 
-	set_bit(HCD_FLAG_HW_ACCESSIBLE, &hcd->flags);
-	set_bit(HCD_FLAG_HW_ACCESSIBLE, &xhci->shared_hcd->flags);
-
 	spin_unlock_irq(&xhci->lock);
-	return 0;
+
+ done:
+	if (retval == 0) {
+		usb_hcd_resume_root_hub(hcd);
+		usb_hcd_resume_root_hub(xhci->shared_hcd);
+	}
+	return retval;
 }
 #endif	/* CONFIG_PM */
 
@@ -1331,9 +1339,6 @@ int xhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 		goto done;
 	}
 
-	xhci_dbg(xhci, "Cancel URB %p\n", urb);
-	xhci_dbg(xhci, "Event ring:\n");
-	xhci_debug_ring(xhci, xhci->event_ring);
 	ep_index = xhci_get_endpoint_index(&urb->ep->desc);
 	ep = &xhci->devs[urb->dev->slot_id]->eps[ep_index];
 	ep_ring = xhci_urb_to_transfer_ring(xhci, urb);
@@ -1342,12 +1347,18 @@ int xhci_urb_dequeue(struct usb_hcd *hcd, struct urb *urb, int status)
 		goto done;
 	}
 
-	xhci_dbg(xhci, "Endpoint ring:\n");
-	xhci_debug_ring(xhci, ep_ring);
-
 	urb_priv = urb->hcpriv;
+	i = urb_priv->td_cnt;
+	if (i < urb_priv->length)
+		xhci_dbg(xhci, "Cancel URB %p, dev %s, ep 0x%x, "
+				"starting at offset 0x%llx\n",
+				urb, urb->dev->devpath,
+				urb->ep->desc.bEndpointAddress,
+				(unsigned long long) xhci_trb_virt_to_dma(
+					urb_priv->td[i]->start_seg,
+					urb_priv->td[i]->first_trb));
 
-	for (i = urb_priv->td_cnt; i < urb_priv->length; i++) {
+	for (; i < urb_priv->length; i++) {
 		td = urb_priv->td[i];
 		list_add_tail(&td->cancelled_td_list, &ep->cancelled_td_list);
 	}
@@ -1618,6 +1629,7 @@ static int xhci_configure_endpoint_result(struct xhci_hcd *xhci,
 		/* FIXME: can we allocate more resources for the HC? */
 		break;
 	case COMP_BW_ERR:
+	case COMP_2ND_BW_ERR:
 		dev_warn(&udev->dev, "Not enough bandwidth "
 				"for new device state.\n");
 		ret = -ENOSPC;
@@ -2794,8 +2806,7 @@ static int xhci_calculate_streams_and_bitmask(struct xhci_hcd *xhci,
 		if (ret < 0)
 			return ret;
 
-		max_streams = USB_SS_MAX_STREAMS(
-				eps[i]->ss_ep_comp.bmAttributes);
+		max_streams = usb_ss_max_streams(&eps[i]->ss_ep_comp);
 		if (max_streams < (*num_streams - 1)) {
 			xhci_dbg(xhci, "Ep 0x%x only supports %u stream IDs.\n",
 					eps[i]->desc.bEndpointAddress,
@@ -3504,6 +3515,10 @@ int xhci_address_device(struct usb_hcd *hcd, struct usb_device *udev)
 	/* Otherwise, update the control endpoint ring enqueue pointer. */
 	else
 		xhci_copy_ep0_dequeue_into_input_ctx(xhci, udev);
+	ctrl_ctx = xhci_get_input_control_ctx(xhci, virt_dev->in_ctx);
+	ctrl_ctx->add_flags = cpu_to_le32(SLOT_FLAG | EP0_FLAG);
+	ctrl_ctx->drop_flags = 0;
+
 	xhci_dbg(xhci, "Slot ID %d Input Context:\n", udev->slot_id);
 	xhci_dbg_ctx(xhci, virt_dev->in_ctx, 2);
 
@@ -3585,7 +3600,6 @@ int xhci_address_device(struct usb_hcd *hcd, struct usb_device *udev)
 	virt_dev->address = (le32_to_cpu(slot_ctx->dev_state) & DEV_ADDR_MASK)
 		+ 1;
 	/* Zero the input context control for later use */
-	ctrl_ctx = xhci_get_input_control_ctx(xhci, virt_dev->in_ctx);
 	ctrl_ctx->add_flags = 0;
 	ctrl_ctx->drop_flags = 0;
 
@@ -3601,26 +3615,38 @@ static int xhci_besl_encoding[16] = {125, 150, 200, 300, 400, 500, 1000, 2000,
 	3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000};
 
 /* Calculate HIRD/BESL for USB2 PORTPMSC*/
-static int xhci_calculate_hird_besl(int u2del, bool use_besl)
+static int xhci_calculate_hird_besl(struct xhci_hcd *xhci,
+					struct usb_device *udev)
 {
-	int hird;
+	int u2del, besl, besl_host;
+	int besl_device = 0;
+	u32 field;
 
-	if (use_besl) {
-		for (hird = 0; hird < 16; hird++) {
-			if (xhci_besl_encoding[hird] >= u2del)
+	u2del = HCS_U2_LATENCY(xhci->hcs_params3);
+	field = le32_to_cpu(udev->bos->ext_cap->bmAttributes);
+
+	if (field & USB_BESL_SUPPORT) {
+		for (besl_host = 0; besl_host < 16; besl_host++) {
+			if (xhci_besl_encoding[besl_host] >= u2del)
 				break;
 		}
+		/* Use baseline BESL value as default */
+		if (field & USB_BESL_BASELINE_VALID)
+			besl_device = USB_GET_BESL_BASELINE(field);
+		else if (field & USB_BESL_DEEP_VALID)
+			besl_device = USB_GET_BESL_DEEP(field);
 	} else {
 		if (u2del <= 50)
-			hird = 0;
+			besl_host = 0;
 		else
-			hird = (u2del - 51) / 75 + 1;
-
-		if (hird > 15)
-			hird = 15;
+			besl_host = (u2del - 51) / 75 + 1;
 	}
 
-	return hird;
+	besl = besl_host + besl_device;
+	if (besl > 15)
+		besl = 15;
+
+	return besl;
 }
 
 static int xhci_usb2_software_lpm_test(struct usb_hcd *hcd,
@@ -3633,7 +3659,7 @@ static int xhci_usb2_software_lpm_test(struct usb_hcd *hcd,
 	u32		temp, dev_id;
 	unsigned int	port_num;
 	unsigned long	flags;
-	int		u2del, hird;
+	int		hird;
 	int		ret;
 
 	if (hcd->speed == HCD_USB3 || !xhci->sw_lpm_support ||
@@ -3679,12 +3705,7 @@ static int xhci_usb2_software_lpm_test(struct usb_hcd *hcd,
 	 * HIRD or BESL shoule be used. See USB2.0 LPM errata.
 	 */
 	pm_addr = port_array[port_num] + 1;
-	u2del = HCS_U2_LATENCY(xhci->hcs_params3);
-	if (le32_to_cpu(udev->bos->ext_cap->bmAttributes) & (1 << 2))
-		hird = xhci_calculate_hird_besl(u2del, 1);
-	else
-		hird = xhci_calculate_hird_besl(u2del, 0);
-
+	hird = xhci_calculate_hird_besl(xhci, udev);
 	temp = PORT_L1DS(udev->slot_id) | PORT_HIRD(hird);
 	xhci_writel(xhci, temp, pm_addr);
 
@@ -3763,7 +3784,7 @@ int xhci_set_usb2_hardware_lpm(struct usb_hcd *hcd,
 	u32		temp;
 	unsigned int	port_num;
 	unsigned long	flags;
-	int		u2del, hird;
+	int		hird;
 
 	if (hcd->speed == HCD_USB3 || !xhci->hw_lpm_support ||
 			!udev->lpm_capable)
@@ -3786,11 +3807,7 @@ int xhci_set_usb2_hardware_lpm(struct usb_hcd *hcd,
 	xhci_dbg(xhci, "%s port %d USB2 hardware LPM\n",
 			enable ? "enable" : "disable", port_num);
 
-	u2del = HCS_U2_LATENCY(xhci->hcs_params3);
-	if (le32_to_cpu(udev->bos->ext_cap->bmAttributes) & (1 << 2))
-		hird = xhci_calculate_hird_besl(u2del, 1);
-	else
-		hird = xhci_calculate_hird_besl(u2del, 0);
+	hird = xhci_calculate_hird_besl(xhci, udev);
 
 	if (enable) {
 		temp &= ~PORT_HIRD_MASK;
@@ -3951,7 +3968,8 @@ int xhci_gen_setup(struct usb_hcd *hcd, xhci_get_quirks_t get_quirks)
 	int			retval;
 	u32			temp;
 
-	hcd->self.sg_tablesize = TRBS_PER_SEGMENT - 2;
+	/* Accept arbitrarily long scatter-gather lists */
+	hcd->self.sg_tablesize = ~0;
 
 	if (usb_hcd_is_primary_hcd(hcd)) {
 		xhci = kzalloc(sizeof(struct xhci_hcd), GFP_KERNEL);
@@ -4046,6 +4064,11 @@ static int __init xhci_hcd_init(void)
 		printk(KERN_DEBUG "Problem registering PCI driver.");
 		return retval;
 	}
+	retval = xhci_register_plat();
+	if (retval < 0) {
+		printk(KERN_DEBUG "Problem registering platform driver.");
+		goto unreg_pci;
+	}
 	/*
 	 * Check the compiler generated sizes of structures that must be laid
 	 * out in specific ways for hardware access.
@@ -4065,11 +4088,15 @@ static int __init xhci_hcd_init(void)
 	BUILD_BUG_ON(sizeof(struct xhci_run_regs) != (8+8*128)*32/8);
 	BUILD_BUG_ON(sizeof(struct xhci_doorbell_array) != 256*32/8);
 	return 0;
+unreg_pci:
+	xhci_unregister_pci();
+	return retval;
 }
 module_init(xhci_hcd_init);
 
 static void __exit xhci_hcd_cleanup(void)
 {
 	xhci_unregister_pci();
+	xhci_unregister_plat();
 }
 module_exit(xhci_hcd_cleanup);

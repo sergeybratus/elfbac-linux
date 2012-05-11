@@ -170,7 +170,7 @@ static bool driver_filter(struct device *dev)
 		return false;
 
 	/* driver filter on but not yet initialized */
-	drv = get_driver(dev->driver);
+	drv = dev->driver;
 	if (!drv)
 		return false;
 
@@ -185,7 +185,6 @@ static bool driver_filter(struct device *dev)
 	}
 
 	read_unlock_irqrestore(&driver_name_lock, flags);
-	put_driver(drv);
 
 	return ret;
 }
@@ -245,7 +244,7 @@ static void put_hash_bucket(struct hash_bucket *bucket,
 
 static bool exact_match(struct dma_debug_entry *a, struct dma_debug_entry *b)
 {
-	return ((a->dev_addr == a->dev_addr) &&
+	return ((a->dev_addr == b->dev_addr) &&
 		(a->dev == b->dev)) ? true : false;
 }
 

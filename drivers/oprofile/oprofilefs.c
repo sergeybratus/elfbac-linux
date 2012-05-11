@@ -60,6 +60,13 @@ ssize_t oprofilefs_ulong_to_user(unsigned long val, char __user *buf, size_t cou
 }
 
 
+/*
+ * Note: If oprofilefs_ulong_from_user() returns 0, then *val remains
+ * unchanged and might be uninitialized. This follows write syscall
+ * implementation when count is zero: "If count is zero ... [and if]
+ * no errors are detected, 0 will be returned without causing any
+ * other effect." (man 2 write)
+ */
 int oprofilefs_ulong_from_user(unsigned long *val, char const __user *buf, size_t count)
 {
 	char tmpbuf[TMPBUFSIZE];
@@ -79,7 +86,7 @@ int oprofilefs_ulong_from_user(unsigned long *val, char const __user *buf, size_
 	raw_spin_lock_irqsave(&oprofilefs_lock, flags);
 	*val = simple_strtoul(tmpbuf, NULL, 0);
 	raw_spin_unlock_irqrestore(&oprofilefs_lock, flags);
-	return 0;
+	return count;
 }
 
 
@@ -99,7 +106,7 @@ static ssize_t ulong_write_file(struct file *file, char const __user *buf, size_
 		return -EINVAL;
 
 	retval = oprofilefs_ulong_from_user(&value, buf, count);
-	if (retval)
+	if (retval <= 0)
 		return retval;
 
 	retval = oprofile_set_ulong(file->private_data, value);
@@ -231,7 +238,6 @@ struct dentry *oprofilefs_mkdir(struct super_block *sb,
 static int oprofilefs_fill_super(struct super_block *sb, void *data, int silent)
 {
 	struct inode *root_inode;
-	struct dentry *root_dentry;
 
 	sb->s_blocksize = PAGE_CACHE_SIZE;
 	sb->s_blocksize_bits = PAGE_CACHE_SHIFT;
@@ -244,15 +250,11 @@ static int oprofilefs_fill_super(struct super_block *sb, void *data, int silent)
 		return -ENOMEM;
 	root_inode->i_op = &simple_dir_inode_operations;
 	root_inode->i_fop = &simple_dir_operations;
-	root_dentry = d_alloc_root(root_inode);
-	if (!root_dentry) {
-		iput(root_inode);
+	sb->s_root = d_make_root(root_inode);
+	if (!sb->s_root)
 		return -ENOMEM;
-	}
 
-	sb->s_root = root_dentry;
-
-	oprofile_create_files(sb, root_dentry);
+	oprofile_create_files(sb, sb->s_root);
 
 	// FIXME: verify kill_litter_super removes our dentries
 	return 0;
