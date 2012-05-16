@@ -36,7 +36,8 @@ struct elfp_desc_readwrite{
 
 struct elfp_desc_call{
 	  elfp_chunk_header_t chunktype;
-	elfp_id_t from,to;
+	elfp_id_t from;
+	elfp_id_t to;
 	uintptr_t offset;/*  offset is within the code range of to*/
 	uint16_t parambytes;
 	uint16_t returnbytes;

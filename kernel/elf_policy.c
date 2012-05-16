@@ -64,6 +64,7 @@ inline int elfp_read_safe(uintptr_t start,uintptr_t end, uintptr_t offset, size_
 	}
 	return 0;
 }
+/*Insert into btree*/
 static int elfp_insert_data_transition(struct elfp_data_transition *data){
 	struct elfp_data_transition ** tree = &(data->from->data);
 	while (*tree) {
@@ -83,6 +84,7 @@ static int elfp_insert_data_transition(struct elfp_data_transition *data){
 	data->left = data->right =NULL;
 	return 0;
 }
+/*Insert into btree*/
 static int elfp_insert_call_transition(struct elfp_call_transition *data){
 	struct elfp_call_transition **tree = &(data->from->calls);
 	while(*tree){
@@ -128,7 +130,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 		elfp_chunk_header_t type;
 		if(elfp_read_safe(start,end,off,sizeof type,&type,tsk))
 			return -EIO;
-		off += sizeof type;
+		/* Do not increment off, because the type is also in the descriptor*/
 		switch(type)
 		{
 		case ELFP_CHUNK_STATE:
@@ -154,6 +156,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			state->data = NULL;
 			state->context = elfp_os_context_new(tsk);
 			elfp_os_copy_mapping(tsk, state->context,buf.low,buf.high);
+			break;
 		}
 		case ELFP_CHUNK_CALL:
 		{
@@ -181,6 +184,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 				return -EINVAL;
 			}
 			elfp_insert_call_transition(data);
+			break;
 		}
 		case ELFP_CHUNK_READWRITE:
 		{
@@ -205,6 +209,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			data->high = buf.high;
 			data->type = buf.type & ELFP_RW_ALL;
 			elfp_insert_data_transition(data);
+			break;
 		}
 		default:
 			return -1; /* terminate process, we have an unknown */

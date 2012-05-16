@@ -44,7 +44,7 @@ void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy);
 int elfp_policy_get_refcount(struct elf_policy *policy);
 static inline size_t elfp_read_policy(uintptr_t off, void *outbuf,size_t size,elfp_process_t *tsk){
 	memcpy (outbuf,(void *)off,size);
-	return 0; /* memcpy doesn't fail */
+	return size; /* memcpy doesn't fail */
 }
 static inline void elfp_os_free_context(elfp_context_t *context){
 	mmput(context);
