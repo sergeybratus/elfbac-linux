@@ -56,10 +56,15 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
 	up_write(&to->mmap_sem);
 	return 0;
 }
-void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy){
+void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate){
 	if(tsk->policy)
 		elfp_task_release_policy(tsk->elf_policy);
+	if(initialstate->policy != policy)
+		panic("ELF policy initial state doesn't belong to policy. Logic error\n");
 	tsk->elf_policy = policy;
+	tsk->elf_policy_mm = tsk->mm;
+	tsk->elfp_current = initialstate;
+	elfp_os_change_context(tsk,initialstate);
 	atomic_inc(&(policy->refs));
 }
 void elfp_task_release_policy(struct elf_policy *policy){

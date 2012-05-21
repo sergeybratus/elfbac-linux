@@ -215,7 +215,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			return -1; /* terminate process, we have an unknown */
 		}
 	}
-	elfp_task_set_policy(tsk,pol);
+	elfp_task_set_policy(tsk,pol,pol->states);
 	return 0;
 }
 int elfp_destroy_policy(struct elf_policy *policy)
