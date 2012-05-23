@@ -1090,20 +1090,6 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 		if (regs->flags & X86_EFLAGS_IF)
 			local_irq_enable();
 	}
-		/* Now switch out the ELF policy segment */
-#ifdef CONFIG_ELF_POLICY
-	if(likely(tsk->elf_policy) && (error_code & PF_INSTR)){
-		if(error_code & PF_INSTR){
-			if(elfp_handle_instruction_address_fault(address,tsk))
-				return;
-		}
-		else{
-			if(elfp_handle_data_address_fault(address,tsk,
-					(error_code & PF_WRITE)? ELFP_RW_WRITE : ELFP_RW_READ))
-				return;
-		}
-	}
-#endif
 	if (unlikely(error_code & PF_RSVD))
 		pgtable_bad(regs, error_code, address);
 
@@ -1150,6 +1136,7 @@ retry:
 		 */
 		might_sleep();
 	}
+
 
 	vma = find_vma(mm, address);
 	if (unlikely(!vma)) {

@@ -93,12 +93,12 @@ newblock:		pcid_block = atomic_add_return(PCID_BLOCK_SIZE, &pcid_current_block);
 			next->context.pcid_generation  = __get_cpu_var(cpu_pcid_generation);
 			next->context.pcid = pcid;
 		}
-
-		load_cr3((pgd_t *)((uintptr_t) next->pgd | (uintptr_t) next->context.pcid | (uintptr_t) (1ul<<63))); /*Set bit 63 so the TLB does not get flushed */
-#else
+		if(global_gen) /* global_gen = 0 if the CPU doesn't support  PCID */
+			load_cr3((pgd_t *)((uintptr_t) next->pgd | (uintptr_t) next->context.pcid | (uintptr_t) (1ul<<63))); /*Set bit 63 so the TLB does not get flushed */
+		else
+#endif
 		/* Re-load page tables */
 		load_cr3(next->pgd);
-#endif
 		/* stop flush ipis for the previous mm */
 		cpumask_clear_cpu(cpu, mm_cpumask(prev));
 

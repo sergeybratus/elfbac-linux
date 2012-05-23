@@ -7,6 +7,20 @@
 
 #ifndef LINUX_elfp_H
 #define LINUX_elfp_H
+#ifdef __KERNEL__
+
+#include <linux/elf-policy-linux.h>
+#include <linux/err.h>
+#include <linux/slab.h>
+#include <linux/sched.h>
+#include <linux/mm.h>
+#include <linux/mm_types.h>
+#include <linux/sched.h>
+#include <linux/atomic.h>
+#include <linux/kernel.h>
+#include <linux/linkage.h>
+#include <asm/mmu_context.h>    /* switch_mm */
+#endif
  typedef uint32_t elfp_id_t;
  typedef uint32_t elfp_chunk_header_t;
 #define ELFP_CHUNK_STATE 1
@@ -48,7 +62,6 @@ struct elfp;
 struct elfp_state;
 struct elfp_call_transition;
 struct elfp_data_transition;
-#include <linux/elf-policy-linux.h>
 struct elf_policy{
   struct elfp_state *states;
   elfp_atomic_ctr_t refs; /*should be made atomic_t */

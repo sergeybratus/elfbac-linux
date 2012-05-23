@@ -5,17 +5,7 @@
  *      Author: julian
  */
 
-#include <linux/kernel.h>
-#include <linux/linkage.h>
 #include <linux/elf-policy.h>
-#include <linux/err.h>
-#include <linux/slab.h>
-#include <linux/sched.h>
-#include <linux/mm.h>
-#include <linux/mm_types.h>
-#include <linux/sched.h>
-#include <linux/atomic.h>
-#include <asm/mmu_context.h>    /* switch_mm */
 
 struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition;
 
@@ -30,13 +20,17 @@ void __init elfp_init(void) {
 			sizeof(struct elfp_data_transition), 0, 0, NULL);
 }
 int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state){
+	struct mm_struct *oldmm = tsk->elf_policy_mm;
 	if(tsk != current){
 		printk(KERN_ERR "elfp_os_change_context: attempted to change context of non-current task\n");
 		return -EINVAL;
 	}
 	spin_lock(&(tsk->alloc_lock));
+	//local_irq_disable();
 	tsk->elfp_current = state;
-	switch_mm(tsk->elf_policy_mm,state->context,tsk);
+	tsk->elf_policy_mm = state->context;
+	switch_mm(oldmm,tsk->elf_policy_mm,tsk);
+	//local_irq_enable();
 	spin_unlock(&(tsk->alloc_lock));
 	return 0;
 }
@@ -62,7 +56,7 @@ void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct 
 	if(initialstate->policy != policy)
 		panic("ELF policy initial state doesn't belong to policy. Logic error\n");
 	tsk->elf_policy = policy;
-	tsk->elf_policy_mm = tsk->mm;
+	tsk->elf_policy_mm = tsk->active_mm;
 	tsk->elfp_current = initialstate;
 	elfp_os_change_context(tsk,initialstate);
 	atomic_inc(&(policy->refs));
@@ -100,4 +94,11 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 	default:
 		return -EINVAL;
 	}
+}
+void debug_break_bug(){
+	printk("About to BUG out\n");
+}
+struct mm_struct *  debug_tlbstate();
+struct mm_struct *  debug_tlbstate(){
+	return percpu_read(cpu_tlbstate.active_mm);
 }

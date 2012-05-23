@@ -11,9 +11,11 @@
 #else
 # define __BUG_C0	"2:\t.long 1b - 2b, %c0 - 2b\n"
 #endif
+extern void debug_break_bug(void);
 
 #define BUG()							\
-do {								\
+do {	\
+	debug_break_bug();\
 	asm volatile("1:\tud2\n"				\
 		     ".pushsection __bug_table,\"a\"\n"		\
 		     __BUG_C0					\

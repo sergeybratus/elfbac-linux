@@ -933,32 +933,6 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	}
 #endif /* ARCH_HAS_SETUP_ADDITIONAL_PAGES */
 
-#ifdef CONFIG_ELF_POLICY
-	elf_ppnt = elf_phdata;
-	for (i = 0; i < loc->elf_ex.e_phnum; i++, elf_ppnt++)
-	if (elf_ppnt->p_type == PT_ELFBAC_POLICY) {
-		void *elfp_buf = kmalloc(elf_ppnt->p_filesz,GFP_KERNEL);
-		if(!elfp_buf){
-			send_sig(SIGKILL, current, 0);
-			goto out;
-		}
-		retval = kernel_read(bprm->file, elf_ppnt->p_offset,
-				     elfp_buf,
-				     elf_ppnt->p_filesz);
-		if (retval != elf_ppnt->p_filesz) {
-			if (retval >= 0)
-				retval = -EIO;
-			send_sig(SIGKILL, current, 0);
-			goto out;
-		}
-		retval = elfp_parse_policy((uintptr_t)elfp_buf, (uintptr_t)(elf_ppnt->p_filesz),current);
-		kfree(elfp_buf);
-		if(retval < 0){
-			send_sig(SIGKILL,current,0);
-			goto out;
-		}
-	}
-#endif
 	install_exec_creds(bprm);
 	retval = create_elf_tables(bprm, &loc->elf_ex,
 			  load_addr, interp_load_addr);
@@ -1008,6 +982,32 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	ELF_PLAT_INIT(regs, reloc_func_desc);
 #endif
 
+#ifdef CONFIG_ELF_POLICY
+	elf_ppnt = elf_phdata;
+	for (i = 0; i < loc->elf_ex.e_phnum; i++, elf_ppnt++)
+	if (elf_ppnt->p_type == PT_ELFBAC_POLICY) {
+		void *elfp_buf = kmalloc(elf_ppnt->p_filesz,GFP_KERNEL);
+		if(!elfp_buf){
+			send_sig(SIGKILL, current, 0);
+			goto out;
+		}
+		retval = kernel_read(bprm->file, elf_ppnt->p_offset,
+				     elfp_buf,
+				     elf_ppnt->p_filesz);
+		if (retval != elf_ppnt->p_filesz) {
+			if (retval >= 0)
+				retval = -EIO;
+			send_sig(SIGKILL, current, 0);
+			goto out;
+		}
+		retval = elfp_parse_policy((uintptr_t)elfp_buf, (uintptr_t)(elf_ppnt->p_filesz),current);
+		kfree(elfp_buf);
+		if(retval < 0){
+			send_sig(SIGKILL,current,0);
+			goto out;
+		}
+	}
+#endif
 	start_thread(regs, elf_entry, bprm->p);
 	retval = 0;
 out:
