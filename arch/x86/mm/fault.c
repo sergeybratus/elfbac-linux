@@ -1136,7 +1136,24 @@ retry:
 		 */
 		might_sleep();
 	}
-
+	/* If we have ELF policy, we might have to switch contexts at this point */
+#ifdef CONFIG_ELF_POLICY
+if(likely(tsk->elf_policy)){
+	if(error_code & PF_INSTR){
+		if(elfp_handle_instruction_address_fault(address,tsk)){
+			up_read(&mm->mmap_sem);
+			return;
+		}
+	}
+	else{
+		if(elfp_handle_data_address_fault(address,tsk,
+				(error_code & PF_WRITE)? ELFP_RW_WRITE : ELFP_RW_READ)){
+			up_read(&mm->mmap_sem);
+			return;
+		}
+	}
+}
+#endif
 
 	vma = find_vma(mm, address);
 	if (unlikely(!vma)) {

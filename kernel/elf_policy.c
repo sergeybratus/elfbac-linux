@@ -155,6 +155,8 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			state->calls = NULL;
 			state->data = NULL;
 			state->context = elfp_os_context_new(tsk);
+			if(!state->context)
+				return -ENOMEM;
 			elfp_os_copy_mapping(tsk, state->context,buf.low,buf.high);
 			break;
 		}
