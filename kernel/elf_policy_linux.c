@@ -5,6 +5,39 @@
  *      Author: julian
  */
 
+/* from mmap.c - massive header blow */
+
+#include <linux/slab.h>
+#include <linux/backing-dev.h>
+#include <linux/mm.h>
+#include <linux/shm.h>
+#include <linux/mman.h>
+#include <linux/pagemap.h>
+#include <linux/swap.h>
+#include <linux/syscalls.h>
+#include <linux/capability.h>
+#include <linux/init.h>
+#include <linux/file.h>
+#include <linux/fs.h>
+#include <linux/personality.h>
+#include <linux/security.h>
+#include <linux/hugetlb.h>
+#include <linux/profile.h>
+#include <linux/export.h>
+#include <linux/mount.h>
+#include <linux/mempolicy.h>
+#include <linux/rmap.h>
+#include <linux/mmu_notifier.h>
+#include <linux/perf_event.h>
+#include <linux/audit.h>
+#include <linux/khugepaged.h>
+
+#include <asm/uaccess.h>
+#include <asm/cacheflush.h>
+#include <asm/tlb.h>
+#include <asm/mmu_context.h>
+
+
 #include <linux/elf-policy.h>
 
 struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition;
@@ -36,6 +69,7 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state){
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end){
 	struct vm_area_struct *mpnt, *tmp, *prev;
+	struct mempolicy *pol;
 	int retval = 0;
 	mpnt =find_vma(from->mm, start);
 	if(!mpnt)
@@ -45,12 +79,12 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
 	down_write(&from->mm->mmap_sem);
 	down_write_nested(&to->mmap_sem, SINGLE_DEPTH_NESTING);
 	if(mpnt->vm_start < start)
-		__split_vma(from,mpnt,start,1);
+		split_vma(from->mm,mpnt,start,1);
 	/* Look at  dup_mmap  and split_vma*/
 	while(mpnt->vm_start < end){
 		struct file *file;
 		if(mpnt->vm_end >=end)
-			__split_vma(from,mpnt,end,0);
+			split_vma(from->mm,mpnt,end,0);
 		/* Dup this individual VMA*/
 		/* Split it if necessary */
 		tmp = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
@@ -68,30 +102,31 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
 			goto fail_nomem_anon_vma_fork;
 		tmp->vm_next = tmp->vm_prev = NULL;
 		file = tmp->vm_file;
-		if (file) {
-			get_file(file);
+		/*if (file) {
+			get_file(file);*/
 			/* insert tmp into the share list, just after mpnt */
-			vma_prio_tree_add(tmp, mpnt);
-		}
+		/*	vma_prio_tree_add(tmp, mpnt);
+		}*/
 		if (is_vm_hugetlb_page(tmp))
 			reset_vma_resv_huge_pages(tmp);
 		/*
 		 * Link in the new vma and copy the page table entries.
 		 * TODO: improve performance, see dup_mmap()
 		 */
-		find_vma_prepare(mm,tmp->vm_start,&prev,&rb_link,&rb_parent);
-		vma_link(mm,tmp,prev,rb_link,rb_parent);
-		mm->map_count++;
-		retval = copy_page_range(to,from, mpnt);
+		insert_vm_struct(to,tmp);
+		/*mm->map_count++;*/
+		retval = copy_page_range(to,from->mm, mpnt);
 
 		if (tmp->vm_ops && tmp->vm_ops->open)
 			tmp->vm_ops->open(tmp);
 		if (retval)
 			goto out;
-		vm = vm->vm_next;
+		mpnt = mpnt->vm_next;
 	}
 	goto out;
 fail_nomem:
+fail_nomem_policy:
+fail_nomem_anon_vma_fork:
 	retval = -ENOMEM;
 out:
 	up_write(&from->mm->mmap_sem);
@@ -130,14 +165,14 @@ elfp_context_t * elfp_os_context_new(struct task_struct *tsk){
 	retval=dup_mm(current);
 	 /* SO BAD!!! */
 	if(retval){
-		struct vma_struct *vma = retval->mmap;
+		struct vm_area_struct *vma = retval->mmap;
 		void * start = vma->vm_start;
 		if(!vma)
 			return NULL;
-		while(vma->next && vma->nezt){
+		while(vma->next && vma->vm_next  && vma->vm_next->vm_end < TASK_SIZE){
 			vma = vma->vm_next;
 		}
-		do_munmap(retval,start,vma->vm_end - start);x
+		do_munmap(retval,start,vma->vm_end - start);
 	}
 	return retval;
 }
