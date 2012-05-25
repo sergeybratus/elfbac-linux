@@ -1136,35 +1136,13 @@ retry:
 		 */
 		might_sleep();
 	}
-	/* If we have ELF policy, we might have to switch contexts at this point */
-#ifdef CONFIG_ELF_POLICY
-if(likely(tsk->elf_policy)){
-	if(error_code & PF_INSTR){
-		if(elfp_handle_instruction_address_fault(address,tsk)){
-			up_read(&mm->mmap_sem);
-			return;
-		}
-	}
-	else{
-		if(elfp_handle_data_address_fault(address,tsk,
-				(error_code & PF_WRITE)? ELFP_RW_WRITE : ELFP_RW_READ)){
-			up_read(&mm->mmap_sem);
-			return;
-		}
-	}
-}
-#endif
-
 	vma = find_vma(mm, address);
-	if (unlikely(!vma)) {
-		bad_area(regs, error_code, address);
-		return;
-	}
+	if (unlikely(!vma))
+		goto bad_area;
 	if (likely(vma->vm_start <= address))
 		goto good_area;
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
-		bad_area(regs, error_code, address);
-		return;
+		goto bad_area;
 	}
 	if (error_code & PF_USER) {
 		/*
@@ -1173,16 +1151,11 @@ if(likely(tsk->elf_policy)){
 		 * and pusha to work. ("enter $65535, $31" pushes
 		 * 32 pointers and then decrements %sp by 65535.)
 		 */
-		if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp)) {
-			bad_area(regs, error_code, address);
-			return;
-		}
+		if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp))
+			goto bad_area;
 	}
-	if (unlikely(expand_stack(vma, address))) {
-		bad_area(regs, error_code, address);
-		return;
-	}
-
+	if (unlikely(expand_stack(vma, address)))
+		goto bad_area;
 	/*
 	 * Ok, we have a good vm_area for this memory access, so
 	 * we can handle it..
@@ -1231,4 +1204,24 @@ good_area:
 	check_v8086_mode(regs, address, tsk);
 
 	up_read(&mm->mmap_sem);
+	return;
+	bad_area:
+	/* If we have ELF policy, we might have to switch contexts at this point */
+#ifdef CONFIG_ELF_POLICY
+	if (likely(tsk->elf_policy)) {
+		if (error_code & PF_INSTR) {
+			if (elfp_handle_instruction_address_fault(address, tsk)) {
+				up_read(&mm->mmap_sem);
+				return;
+			}
+		} else {
+			if (elfp_handle_data_address_fault(address, tsk, (error_code
+					& PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ)) {
+				up_read(&mm->mmap_sem);
+				return;
+			}
+		}
+	}
+#endif
+	bad_area(regs, error_code, address);
 }

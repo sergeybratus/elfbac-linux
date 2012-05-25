@@ -68,7 +68,7 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state){
 	return 0;
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end){
-	struct vm_area_struct *mpnt, *tmp, *prev;
+	struct vm_area_struct *mpnt, *tmp;
 	struct mempolicy *pol;
 	int retval = 0;
 	mpnt =find_vma(from->mm, start);
@@ -76,8 +76,11 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
 		return -EINVAL;
 	if(mpnt->vm_start > start) /* not mapped */
 		return -EINVAL;
+	/* Well ordered locking, because 'to' is always a shadow mm  and
+	 * from a real address space	 */
 	down_write(&from->mm->mmap_sem);
-	down_write_nested(&to->mmap_sem, SINGLE_DEPTH_NESTING);
+	/*TODO: No lock here*/
+	//down_write(&to->mmap_sem);
 	if(mpnt->vm_start < start)
 		split_vma(from->mm,mpnt,start,1);
 	/* Look at  dup_mmap  and split_vma*/
@@ -130,7 +133,7 @@ fail_nomem_anon_vma_fork:
 	retval = -ENOMEM;
 out:
 	up_write(&from->mm->mmap_sem);
-	up_write(&to->mmap_sem);
+	/*up_write(&to->mmap_sem);*/
 	return retval;
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate){
@@ -166,10 +169,10 @@ elfp_context_t * elfp_os_context_new(struct task_struct *tsk){
 	 /* SO BAD!!! */
 	if(retval){
 		struct vm_area_struct *vma = retval->mmap;
-		void * start = vma->vm_start;
+		uintptr_t start = vma->vm_start;
 		if(!vma)
 			return NULL;
-		while(vma->next && vma->vm_next  && vma->vm_next->vm_end < TASK_SIZE){
+		while(vma->vm_next  && vma->vm_next->vm_end <= TASK_SIZE){
 			vma = vma->vm_next;
 		}
 		do_munmap(retval,start,vma->vm_end - start);

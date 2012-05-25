@@ -25,21 +25,20 @@
  typedef uint32_t elfp_chunk_header_t;
 #define ELFP_CHUNK_STATE 1
  #define ELFP_CHUNK_CALL 2
- #define ELFP_CHUNK_READWRITE 3
+ #define ELFP_CHUNK_DATA 3
  #pragma pack(push,1)
  struct elfp_desc_header{
 	 uint32_t chunkcount;
  } __attribute__ ((__packed__));
 struct   elfp_desc_state{
   elfp_chunk_header_t chunktype;
-  uintptr_t low; /* User space begin pointer */
-  uintptr_t high; /* User space end pointer */
   elfp_id_t id;
 }__attribute__((__packed__));
 #define ELFP_RW_READ (1u << 0)
 #define ELFP_RW_WRITE (1u << 1)
+#define ELFP_RW_EXEC  (1u << 2)
 #define ELFP_RW_ALL (ELFP_RW_READ | ELFP_RW_WRITE)
-struct elfp_desc_readwrite{
+struct elfp_desc_data{
 	  elfp_chunk_header_t chunktype;
 	uintptr_t low;
 	uintptr_t high;
@@ -68,7 +67,6 @@ struct elf_policy{
 };
 struct elfp_state {
   elfp_context_t *context;
-  uintptr_t codelow,codehigh;
   struct elfp_call_transition *calls;
   struct elfp_data_transition *data;
   struct elfp_state *prev,*next;
@@ -105,9 +103,5 @@ extern int elfp_parse_policy(uintptr_t policy_offset_start,uintptr_t policy_size
 extern int elfp_destroy_policy(struct elf_policy *policy);
 extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk);
 extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk,int access_type);
-
-static inline int elfp_address_in_segment(uintptr_t address,struct elfp_state *state){
-	return (address >= state->codelow) && (address <= state->codehigh);
-}
 #endif
 #endif
