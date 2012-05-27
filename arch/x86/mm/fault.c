@@ -1214,12 +1214,16 @@ good_area:
 				up_read(&mm->mmap_sem);
 				return;
 			}
+			else
+				do_exit(SIGKILL);
 		} else {
 			if (elfp_handle_data_address_fault(address, tsk, (error_code
 					& PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ)) {
 				up_read(&mm->mmap_sem);
 				return;
 			}
+			else
+				do_exit(SIGKILL);
 		}
 	}
 #endif
