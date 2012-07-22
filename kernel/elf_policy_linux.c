@@ -106,6 +106,7 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
 		tmp->vm_next = tmp->vm_prev = NULL;
 		file = tmp->vm_file;
 		/*if (file) {
+		INIT_LIST_HEAD()
 			get_file(file);*/
 			/* insert tmp into the share list, just after mpnt */
 		/*	vma_prio_tree_add(tmp, mpnt);
@@ -125,6 +126,8 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
 		if (retval)
 			goto out;
 		mpnt = mpnt->vm_next;
+		tmp->elfp_clone_next = to->elfp_clones;
+		to->elfp_clones = tmp->elfp_clone_next;
 	}
 	goto out;
 fail_nomem:

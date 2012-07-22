@@ -210,8 +210,11 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			if(!data->to){
 				return -EINVAL;
 			}
-			data->low = buf.low;
-			data->high = buf.high;
+			data->low = buf.addr1;
+			if(data->type & ELFP_RW_SIZE)
+			  data->high = buf.addr1 + buf.addr2;
+			else 
+			  data->high = buf.addr2;
 			data->type = buf.type;
 			elfp_insert_data_transition(data);
 			break;
