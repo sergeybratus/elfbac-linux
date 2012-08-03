@@ -28,13 +28,21 @@
 #define ELFP_CHUNK_STATE 1
  #define ELFP_CHUNK_CALL 2
  #define ELFP_CHUNK_DATA 3
+#define ELFP_CHUNK_STACK 4
+#define ELFP_CHUNK_STACKACCESS 5
  #pragma pack(push,1)
  struct elfp_desc_header{
 	 uint32_t chunkcount;
  } __attribute__ ((__packed__));
+struct elfp_desc_stack{
+  elfp_chunk_header_t chunktype;
+  elfp_id_t id;
+  uint64_t size;
+} __attribute__((__packed__));
 struct   elfp_desc_state{
   elfp_chunk_header_t chunktype;
   elfp_id_t id;
+  elfp_id_t stack_id;
 }__attribute__((__packed__));
 #define ELFP_RW_READ (1u << 0)
 #define ELFP_RW_WRITE (1u << 1)
@@ -58,6 +66,13 @@ struct elfp_desc_call{
 	uint16_t parambytes;
 	uint16_t returnbytes;
 }__attribute__ ((__packed__));
+struct elfp_desc_stackaccess{
+  elfp_chunk_header_t chunktype;
+  elfp_id_t from;
+  elfp_id_t to;
+  elfp_id_t stack;
+  uint32_t type;
+}
 #pragma pack(pop)
 #ifdef __KERNEL__
 struct elfp;
@@ -76,6 +91,11 @@ struct elfp_state {
   struct elf_policy *policy; /* Also has the lock */
   elfp_id_t id;
 };
+struct elfp_stack {
+  struct elfp_stack *left,*right;
+  uintptr_t low,high;
+  elfp_os_stack os; 
+}
 struct elfp_call_transition{
 	struct elfp_call_transition *left,*right; /* Sorted by 'from', the 'to' */
 	struct elfp_state *from,*to;
@@ -91,9 +111,10 @@ struct elfp_data_transition {
 	unsigned short type; /* READ / WRITE flags */
 };
 /* How to handle returns? */
-struct elfp_stack_frame{ /* TODO: add calls that cannot be returned from!*/
-	struct elfp_call_transition *trans;
-	struct elfp_stack_frame *down;
+struct elfp_stack_frame{ 
+  struct elfp_call_transition *trans;
+  struct elfp_stack_frame *down;
+  bool call;
 };
 /* OS primitives*/
 extern int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *context);

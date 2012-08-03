@@ -219,6 +219,14 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			elfp_insert_data_transition(data);
 			break;
 		}
+		case ELFP_CHUNK_STACK:
+		{
+		  struct elfp_desc_stack buf;
+		  if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk))
+		    return -EIO;
+		  off += sizeof buf;
+		  
+		}
 		default:
 			return -1; /* terminate process, we have an unknown */
 		}

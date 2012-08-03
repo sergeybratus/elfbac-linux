@@ -52,6 +52,12 @@ void __init elfp_init(void) {
 	elfp_slab_data_transition =  kmem_cache_create("elfp_policy_data_transition",
 			sizeof(struct elfp_data_transition), 0, 0, NULL);
 }
+elfp_stack * elfp_os_alloc_stack(elfp_proccess_t *tsk, size_t size){
+}
+int elfp_os_free_stack(elfp_stack *stack){}
+int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack){
+  assert(0);
+}
 int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state){
 	struct mm_struct *oldmm = tsk->elf_policy_mm;
 	if(tsk != current){
