@@ -40,7 +40,7 @@
 
 #include <linux/elf-policy.h>
 
-struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition;
+struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack;
 
 void __init elfp_init(void) {
 	elfp_slab_state =  kmem_cache_create("elfp_state",
@@ -51,10 +51,17 @@ void __init elfp_init(void) {
 			sizeof(struct elfp_call_transition), 0, 0, NULL);
 	elfp_slab_data_transition =  kmem_cache_create("elfp_policy_data_transition",
 			sizeof(struct elfp_data_transition), 0, 0, NULL);
+	elfp_slab_stack = kmem_cache_create("elfp_stack",sizeof(struct elfp_state),0,0,NULL);
 }
 elfp_stack * elfp_os_alloc_stack(elfp_proccess_t *tsk, size_t size){
+	struct elfp_stack *retval = kmem_cache_alloc(elfp_slab_stack,GFP_KERNEL);
+	do_mmap(NULL,0,size,PROT_READ|PROP_WRITE,MAP_STACK,0);
+err_mem:
+	kmem_cache_free(elfp_slab_stack,retval);
 }
-int elfp_os_free_stack(elfp_stack *stack){}
+int elfp_os_free_stack(elfp_stack *stack){
+
+}
 int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack){
   assert(0);
 }
