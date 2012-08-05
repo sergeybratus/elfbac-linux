@@ -1000,7 +1000,7 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 			send_sig(SIGKILL, current, 0);
 			goto out;
 		}
-		retval = elfp_parse_policy((uintptr_t)elfp_buf, (uintptr_t)(elf_ppnt->p_filesz),current);
+		retval = elfp_parse_policy((uintptr_t)elfp_buf, (uintptr_t)(elf_ppnt->p_filesz),current,regs);
 		kfree(elfp_buf);
 		if(retval < 0){
 			send_sig(SIGKILL,current,0);

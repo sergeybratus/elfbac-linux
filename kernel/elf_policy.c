@@ -7,15 +7,15 @@
 int elfp_handle_instruction_address_fault(uintptr_t address,
 		elfp_process_t *tsk,elfp_intr_state_t regs) {
 	struct elfp_state *state = elfp_task_get_current_state(tsk);
-	int retval = elfp_handle_data_address_fault(address,tsk,ELFP_RW_EXEC);
+	int retval = elfp_handle_data_address_fault(address,tsk,ELFP_RW_EXEC,regs);
 	if (!retval) { /* Handle a call */
-		if(ELFP_TASK_STACKPTR(tsk) && ELFP_TASK_STACKPTR(tsk)->ret_offset == address){
-			/* Handle a return: Pop stack frame and allow */
-			struct elfp_stack_frame *stack = ELFP_TASK_STACKPTR(tsk)
+	  /* if(ELFP_TASK_STACKPTR(tsk) && ELFP_TASK_STACKPTR(tsk)->ret_offset == address){
+			/* Handle a return: Pop stack frame and allow 
+		  struct elfp_stack_frame *stack = ELFP_TASK_STACKPTR(tsk);
 			elfp_os_copy_stack_bytes(stack->stack,stack->to->stack,stack->returnbytes);
 			ELFP_TASK_STACKPTR(tsk) = stack->down;
-			elfp_free_stack_frame(stack);
-		}
+			//elfp_free_stack_frame(stack);
+			}*/
 		struct elfp_call_transition *transition = state->calls;
 		while(transition && (transition->offset != address)){
 			if(transition->offset < address)
@@ -75,12 +75,19 @@ inline int elfp_read_safe(uintptr_t start,uintptr_t end, uintptr_t offset, size_
 }
 /*Insert into btree*/
 static int elfp_insert_data_transition(struct elfp_data_transition *data){
-	struct elfp_stack ** tree = &(data->from->data);
+	struct elfp_data_transition ** tree = &(data->from->data);
 	while (*tree) {
-		if ((*tree)->id > data->id)
+		if ((*tree)->to > data->to)
 			tree = &((*tree)->left);
-		else
+		else if ((*tree)->to < data->to)
 			tree = &((*tree)->right);
+		else {/* We do not need to sort on high, but TODO: make sure they don't overlap */
+			if ((*tree)->low < data->low)
+				tree = &((*tree)->left);
+			else {
+				tree = &((*tree)->right);
+			}
+		}
 	}
 	*tree = data;
 	data->left = data->right =NULL;
@@ -116,7 +123,7 @@ static struct elfp_state *elfp_find_state_by_id(struct elf_policy * pol, elfp_id
 		return NULL;
 }
 static struct elfp_stack *elfp_find_stack_by_id(struct elf_policy *pol, elfp_id_t id){
-	struct elfp_stack *retval = pol->stack;
+	struct elfp_stack *retval = pol->stacks;
 	while(retval && id!=retval->id)
 		retval = retval->next;
 	if(retval)
@@ -124,7 +131,7 @@ static struct elfp_stack *elfp_find_stack_by_id(struct elf_policy *pol, elfp_id_
 	else
 		return NULL;
 }
-int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
+int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_intr_state_t regs){
 	uintptr_t end = start +size;
 	struct elf_policy *pol;
 	struct elfp_desc_header hdr;
@@ -287,7 +294,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 		elfp_os_errormsg("elfp_parse_policy: Binary does not contain initial state 1\n");
 		return -EINVAL;
 	}
-	elfp_task_set_policy(tsk,pol,state);
+	elfp_task_set_policy(tsk,pol,state,regs);
 	return 0;
 }
 int elfp_destroy_policy(struct elf_policy *policy)
