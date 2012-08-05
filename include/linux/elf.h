@@ -279,7 +279,9 @@ typedef struct elf64_phdr {
 #define SHT_REL		9
 #define SHT_SHLIB	10
 #define SHT_DYNSYM	11
-#define SHT_NUM		12
+#define SHT_ELFBAC      12
+#define SHT_NUM		13
+
 #define SHT_LOPROC	0x70000000
 #define SHT_HIPROC	0x7fffffff
 #define SHT_LOUSER	0x80000000

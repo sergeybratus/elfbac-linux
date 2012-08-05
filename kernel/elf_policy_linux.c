@@ -40,7 +40,7 @@
 
 #include <linux/elf-policy.h>
 
-struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition;
+struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack;
 
 void __init elfp_init(void) {
 	elfp_slab_state =  kmem_cache_create("elfp_state",
@@ -51,8 +51,36 @@ void __init elfp_init(void) {
 			sizeof(struct elfp_call_transition), 0, 0, NULL);
 	elfp_slab_data_transition =  kmem_cache_create("elfp_policy_data_transition",
 			sizeof(struct elfp_data_transition), 0, 0, NULL);
+	elfp_slab_stack = kmem_cache_create("elfp_stack",sizeof(struct elfp_state),0,0,NULL);
 }
-int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state){
+elfp_stack * elfp_os_alloc_stack(elfp_proccess_t *tsk, size_t size){
+	struct elfp_stack *retval = kmem_cache_alloc(elfp_slab_stack,GFP_KERNEL);
+	down_write(&mm->mmap_sem);
+	if(retval) goto err;
+	retval->low = do_mmap(NULL,0,size,vm_get_page_prot(VM_STACK_DEFAULT_FLAGS),VM_STACK_DEFAULT_FLAGS,0);
+	if(!retval->low) goto err_mmap;
+	retval->high = retval->low + size;
+// TODO: support stack growing up!
+	retval->os = retval->high;
+	retval->prev = retval->next = NULL;
+	up_write(&mm->mmap_sem);
+	return retval;
+	err:
+	up_write(&mm->mmap_sem);
+	return NULL;
+}
+int elfp_os_free_stack(elfp_stack *stack){
+	BUG_ON( do_munmap(stack->low,stack));
+	kmem_cache_free(stack);
+	return NULL;
+}
+int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack,elfp_intr_state_t regs){
+	elfp_task_get_current_state(tsk)->stack->os = regs->sp;
+	regs->sp = stack->os;
+	this_cpu_write(old_rsp, stack->os);
+
+}
+int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_intr_state_t regs){
 	struct mm_struct *oldmm = tsk->elf_policy_mm;
 	if(tsk != current){
 		printk(KERN_ERR "elfp_os_change_context: attempted to change context of non-current task\n");
@@ -62,6 +90,9 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state){
 	//local_irq_disable();
 	tsk->elfp_current = state;
 	tsk->elf_policy_mm = state->context;
+	if(state->stack){
+		elfp_os_change_stack(tsk,stack,regs)
+	}
 	switch_mm(oldmm,tsk->elf_policy_mm,tsk);
 	//local_irq_enable();
 	spin_unlock(&(tsk->alloc_lock));

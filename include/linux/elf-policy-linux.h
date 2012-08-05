@@ -18,7 +18,10 @@ extern void __init elfp_init(void);
 typedef struct mm_struct elfp_context_t;
 typedef struct task_struct elfp_process_t;
 typedef atomic_t elfp_atomic_ctr_t;
-
+typedef struct pt_regs* elfp_intr_state_t;
+#ifdef CONFIG_X86_64
+typedef unsigned long elfp_os_stack; //Stack pointer
+#endif
 #define ELFP_ATOMIC_CTR_INIT(lvalue, rvalue) do { lvalue = ATOMIC_INIT(rvalue); } while(0);
 #define ELFP_LINUX_ALLOC_HELPER(type,name) \
 	extern struct kmem_cache *elfp_slab_ ## name; \
@@ -39,6 +42,8 @@ static inline struct elfp_state *elfp_task_get_current_state(elfp_process_t *tsk
 static inline struct elf_policy *elfp_task_get_policy(elfp_process_t *tsk){
 	return tsk->elf_policy;
 }
+#define ELFP_TASK_STACKPTR(tsk) ((tsk)->elfp_stack)
+
 void elfp_task_release_policy(struct elf_policy *policy);
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initial);
 int elfp_policy_get_refcount(struct elf_policy *policy);
