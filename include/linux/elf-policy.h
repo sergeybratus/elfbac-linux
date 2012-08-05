@@ -20,6 +20,8 @@
 #include <linux/kernel.h>
 #include <linux/linkage.h>
 #include <asm/mmu_context.h>    /* switch_mm */
+#else
+#include <stdint.h>
 #endif
  typedef uint32_t elfp_id_t;
  typedef uint32_t elfp_chunk_header_t;
@@ -37,21 +39,22 @@ struct   elfp_desc_state{
 #define ELFP_RW_READ (1u << 0)
 #define ELFP_RW_WRITE (1u << 1)
 #define ELFP_RW_EXEC  (1u << 2)
+#define ELFP_RW_SIZE (1u << 3)
 #define ELFP_RW_ALL (ELFP_RW_READ | ELFP_RW_WRITE)
 struct elfp_desc_data{
-	  elfp_chunk_header_t chunktype;
-	uintptr_t low;
-	uintptr_t high;
-	elfp_id_t from;
-	elfp_id_t to;
-	uint32_t type;
+  elfp_chunk_header_t chunktype;
+  uintptr_t addr1; /*The start of the address range*/
+  uintptr_t addr2; /*The size of the address range if  ELFP_RW_SIZE is set, otherwise the end of the address range*/
+  elfp_id_t from;
+  elfp_id_t to;
+  uint32_t type;
 }__attribute__ ((__packed__));
 
 struct elfp_desc_call{
 	  elfp_chunk_header_t chunktype;
 	elfp_id_t from;
 	elfp_id_t to;
-	uintptr_t offset;/*  offset is within the code range of to*/
+	uintptr_t offset;/*offset is within the code range of to*/
 	uint16_t parambytes;
 	uint16_t returnbytes;
 }__attribute__ ((__packed__));

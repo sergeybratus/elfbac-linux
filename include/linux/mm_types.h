@@ -252,6 +252,9 @@ struct vm_area_struct {
 #ifdef CONFIG_NUMA
 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
 #endif
+#ifdef CONFIG_ELF_POLICY
+	struct vm_area_struct *elfp_clone_next;
+#endif
 };
 
 struct core_thread {
@@ -387,6 +390,9 @@ struct mm_struct {
 #endif
 #ifdef CONFIG_CPUMASK_OFFSTACK
 	struct cpumask cpumask_allocation;
+#endif
+#ifdef CONFIG_ELF_POLICY
+	struct vm_area_struct *elfp_clones;
 #endif
 };
 
