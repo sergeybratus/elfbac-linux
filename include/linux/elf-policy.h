@@ -72,7 +72,7 @@ struct elfp_desc_stackaccess{
   elfp_id_t to;
   elfp_id_t stack;
   uint32_t type;
-}
+};
 #pragma pack(pop)
 #ifdef __KERNEL__
 struct elfp;
@@ -100,7 +100,7 @@ struct elfp_stack {
   elfp_id_t id;
   uintptr_t low,high;
   elfp_os_stack os;
-}
+};
 struct elfp_call_transition{
 	struct elfp_call_transition *left,*right; /* Sorted by 'from', the 'to' */
 	struct elfp_state *from,*to;
@@ -129,12 +129,12 @@ extern int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr
 extern int elfp_os_copy_stack_bytes(struct elfp_stack *from,struct elfp_stack *to,size_t nbytes,elfp_intr_state_t regs);
 extern int elfp_os_errormsg(char *message);
 extern elfp_context_t * elfp_os_context_new(elfp_process_t *tsk);
-elfp_stack * elfp_os_alloc_stack(elfp_proccess_t *tsk, size_t size);
+struct elfp_stack * elfp_os_alloc_stack(elfp_process_t *tsk, size_t size);
 int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack,elfp_intr_state_t regs);
-int elfp_os_free_stack(elfp_stack *stack);
+int elfp_os_free_stack(elfp_process_t *tsk,struct elfp_stack *stack);
 
 /* VM hooks */
-extern int elfp_parse_policy(uintptr_t policy_offset_start,uintptr_t policy_size, elfp_process_t *tsk);
+extern int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_intr_state_t regs);
 extern int elfp_destroy_policy(struct elf_policy *policy);
 extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk,elfp_intr_state_t regs);
 extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk,int access_type,elfp_intr_state_t regs);

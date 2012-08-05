@@ -1210,7 +1210,7 @@ good_area:
 #ifdef CONFIG_ELF_POLICY
 	if (likely(tsk->elf_policy)) {
 		if (error_code & PF_INSTR) {
-			if (elfp_handle_instruction_address_fault(address, tsk)) {
+		  if (elfp_handle_instruction_address_fault(address, tsk,regs)) {
 				do_exit(SIGKILL);
 				return;
 			}
@@ -1220,7 +1220,7 @@ good_area:
 			}
 		} else {
 			if (elfp_handle_data_address_fault(address, tsk, (error_code
-					& PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ)) {
+									  & PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ,regs)) {
 				up_read(&mm->mmap_sem);
 				return;
 			}
