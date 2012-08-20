@@ -5,10 +5,17 @@
 */
 #include "elf_policy_linux.c"
 int elfp_handle_instruction_address_fault(uintptr_t address,
-		elfp_process_t *tsk) {
+		elfp_process_t *tsk,elfp_intr_state_t regs) {
 	struct elfp_state *state = elfp_task_get_current_state(tsk);
-	int retval = elfp_handle_data_address_fault(address,tsk,ELFP_RW_EXEC);
+	int retval = elfp_handle_data_address_fault(address,tsk,ELFP_RW_EXEC,regs);
 	if (!retval) { /* Handle a call */
+	  /* if(ELFP_TASK_STACKPTR(tsk) && ELFP_TASK_STACKPTR(tsk)->ret_offset == address){
+			/* Handle a return: Pop stack frame and allow 
+		  struct elfp_stack_frame *stack = ELFP_TASK_STACKPTR(tsk);
+			elfp_os_copy_stack_bytes(stack->stack,stack->to->stack,stack->returnbytes);
+			ELFP_TASK_STACKPTR(tsk) = stack->down;
+			//elfp_free_stack_frame(stack);
+			}*/
 		struct elfp_call_transition *transition = state->calls;
 		while(transition && (transition->offset != address)){
 			if(transition->offset < address)
@@ -20,14 +27,14 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
 			return 0; /* Kill process */
 		}
 		else{
-			elfp_os_change_context(tsk,transition->to);/* TODO: Copy stack, handle return */
+			elfp_os_change_context(tsk,transition->to,regs);/* TODO: Copy stack, handle return */
 			return 1;
 		}
 	}
 	return retval; /* Fail */
 }
 /* TODO handle overlapping, etc with only different accesses */
-int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int access_type){
+int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int access_type,elfp_intr_state_t regs){
 	struct elfp_state *state = elfp_task_get_current_state(tsk);
 	struct elfp_data_transition *transition = state->data;
 	while(transition && (transition->high < address || transition->low >address)){
@@ -42,7 +49,7 @@ int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int ac
 			return 1;
 		}
 		else{
-			elfp_os_change_context(tsk,transition->to);
+			elfp_os_change_context(tsk,transition->to,regs);
 			return 1;
 		}
 	}
@@ -115,7 +122,16 @@ static struct elfp_state *elfp_find_state_by_id(struct elf_policy * pol, elfp_id
 	else
 		return NULL;
 }
-int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
+static struct elfp_stack *elfp_find_stack_by_id(struct elf_policy *pol, elfp_id_t id){
+	struct elfp_stack *retval = pol->stacks;
+	while(retval && id!=retval->id)
+		retval = retval->next;
+	if(retval)
+		return retval;
+	else
+		return NULL;
+}
+int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_intr_state_t regs){
 	uintptr_t end = start +size;
 	struct elf_policy *pol;
 	struct elfp_desc_header hdr;
@@ -163,6 +179,23 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			//elfp_os_copy_mapping(tsk, state->context,buf.low,buf.high);
 			break;
 		}
+		case ELFP_CHUNK_STACK:
+		{
+		  struct elfp_desc_stack buf;
+		  struct elfp_stack *stack;
+		  if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk))
+		    return -EIO;
+		  off += sizeof buf;
+		  stack = elfp_os_alloc_stack(tsk,buf.size);
+		  stack->id = buf.id;
+		  if(!stack)
+			  	  return -ENOMEM;
+		  if(pol->stacks)
+			  pol->stacks->prev = stack;
+		  stack->next = pol->stacks;
+		  pol->stacks = stack;
+		  break;
+		}
 		case ELFP_CHUNK_CALL:
 		{
 			struct elfp_desc_call buf;
@@ -208,6 +241,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			}
 			data->to = elfp_find_state_by_id(pol,buf.to);
 			if(!data->to){
+
 				return -EINVAL;
 			}
 			data->low = buf.addr1;
@@ -219,13 +253,37 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 			elfp_insert_data_transition(data);
 			break;
 		}
-		case ELFP_CHUNK_STACK:
+		case ELFP_CHUNK_STACKACCESS:
 		{
-		  struct elfp_desc_stack buf;
-		  if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk))
-		    return -EIO;
-		  off += sizeof buf;
-		  
+			struct elfp_desc_stackaccess buf;
+			struct elfp_data_transition *data = elfp_alloc_data_transition();
+			struct elfp_stack *stack;
+			if(!data)
+				return -ENOMEM;
+			if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk)){
+				elfp_free_data_transition(data);
+				return -EIO;
+			}
+			off += sizeof buf;
+			stack =  elfp_find_state_by_id(pol,buf.stack);
+			if(!stack){
+				elfp_free_data_transition(data);
+				elfp_os_errormsg("Stack not found\n");
+				return -EIO;
+			}
+			data->type = buf.type & (~ELFP_RW_EXEC);
+			data->from = elfp_find_state_by_id(pol,buf.from);
+			if(!data->from){
+				return -EINVAL;
+			}
+			data->to = elfp_find_state_by_id(pol,buf.to);
+			if(!data->to){
+				return -EINVAL;
+			}
+			data->low = stack->low;
+			data->high = stack->high;
+			elfp_insert_data_transition(data);
+			break;
 		}
 		default:
 			return -1; /* terminate process, we have an unknown */
@@ -236,7 +294,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk){
 		elfp_os_errormsg("elfp_parse_policy: Binary does not contain initial state 1\n");
 		return -EINVAL;
 	}
-	elfp_task_set_policy(tsk,pol,state);
+	elfp_task_set_policy(tsk,pol,state,regs);
 	return 0;
 }
 int elfp_destroy_policy(struct elf_policy *policy)

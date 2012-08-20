@@ -53,19 +53,36 @@ void __init elfp_init(void) {
 			sizeof(struct elfp_data_transition), 0, 0, NULL);
 	elfp_slab_stack = kmem_cache_create("elfp_stack",sizeof(struct elfp_state),0,0,NULL);
 }
-elfp_stack * elfp_os_alloc_stack(elfp_proccess_t *tsk, size_t size){
+struct elfp_stack * elfp_os_alloc_stack(elfp_process_t *tsk, size_t size){
 	struct elfp_stack *retval = kmem_cache_alloc(elfp_slab_stack,GFP_KERNEL);
-	do_mmap(NULL,0,size,PROT_READ|PROP_WRITE,MAP_STACK,0);
-err_mem:
+	down_write(&tsk->mm->mmap_sem);
+	if(!retval) goto err;
+	retval->low = do_mmap(NULL,0,size,PROT_READ|PROT_WRITE,MAP_ANONYMOUS,0);
+	if(!retval->low) goto err_mmap;
+	retval->high = retval->low + size;
+// TODO: support stack growing up!
+	retval->os = retval->high;
+	retval->prev = retval->next = NULL;
+	up_write(&tsk->mm->mmap_sem);
+	return retval;
+ err_mmap:
 	kmem_cache_free(elfp_slab_stack,retval);
+	err:
+	up_write(&tsk->mm->mmap_sem);
+	return NULL;
 }
-int elfp_os_free_stack(elfp_stack *stack){
-  do_munmap(stack->os);
+int elfp_os_free_stack(elfp_process_t *tsk,struct elfp_stack *stack){
+        BUG_ON(do_munmap(tsk->mm,stack->low,stack->high - stack->low));
+	kmem_cache_free(elfp_slab_stack,stack);
+	return 0;
 }
-int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack){
-  assert(0);
+int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack,elfp_intr_state_t regs){
+	elfp_task_get_current_state(tsk)->stack->os = regs->sp;
+	regs->sp = stack->os;
+	this_cpu_write(old_rsp, stack->os);
+	return 0;
 }
-int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state){
+int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_intr_state_t regs){
 	struct mm_struct *oldmm = tsk->elf_policy_mm;
 	if(tsk != current){
 		printk(KERN_ERR "elfp_os_change_context: attempted to change context of non-current task\n");
@@ -75,6 +92,9 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state){
 	//local_irq_disable();
 	tsk->elfp_current = state;
 	tsk->elf_policy_mm = state->context;
+	if(state->stack){
+	  elfp_os_change_stack(tsk,state->stack,regs);
+	}
 	switch_mm(oldmm,tsk->elf_policy_mm,tsk);
 	//local_irq_enable();
 	spin_unlock(&(tsk->alloc_lock));
@@ -152,7 +172,7 @@ out:
 	/*up_write(&to->mmap_sem);*/
 	return retval;
 }
-void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate){
+void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
 	if(tsk->policy)
 		elfp_task_release_policy(tsk->elf_policy);
 	if(initialstate->policy != policy)
@@ -160,7 +180,7 @@ void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct 
 	tsk->elf_policy = policy;
 	tsk->elf_policy_mm = tsk->active_mm;
 	tsk->elfp_current = initialstate;
-	elfp_os_change_context(tsk,initialstate);
+	elfp_os_change_context(tsk,initialstate,regs);
 	atomic_inc(&(policy->refs));
 }
 void elfp_task_release_policy(struct elf_policy *policy){
@@ -209,6 +229,7 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 void debug_break_bug(){
 	printk("About to BUG out\n");
 }
+EXPORT_SYMBOL(debug_break_bug);
 struct mm_struct *  debug_tlbstate();
 struct mm_struct *  debug_tlbstate(){
 	return percpu_read(cpu_tlbstate.active_mm);

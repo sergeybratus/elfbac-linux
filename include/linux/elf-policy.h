@@ -77,11 +77,14 @@ struct elfp_desc_stackaccess{
 #ifdef __KERNEL__
 struct elfp;
 struct elfp_state;
+struct elfp_stack;
 struct elfp_call_transition;
 struct elfp_data_transition;
 struct elf_policy{
   struct elfp_state *states;
+  struct elfp_stack *stacks;
   elfp_atomic_ctr_t refs; /*should be made atomic_t */
+
 };
 struct elfp_state {
   elfp_context_t *context;
@@ -89,12 +92,14 @@ struct elfp_state {
   struct elfp_data_transition *data;
   struct elfp_state *prev,*next;
   struct elf_policy *policy; /* Also has the lock */
+  struct elfp_stack *stack;
   elfp_id_t id;
 };
 struct elfp_stack {
-  struct elfp_stack *left,*right;
+  struct elfp_stack *prev,*next;
+  elfp_id_t id;
   uintptr_t low,high;
-  elfp_os_stack os; 
+  elfp_os_stack os;
 };
 struct elfp_call_transition{
 	struct elfp_call_transition *left,*right; /* Sorted by 'from', the 'to' */
@@ -114,21 +119,24 @@ struct elfp_data_transition {
 struct elfp_stack_frame{ 
   struct elfp_call_transition *trans;
   struct elfp_stack_frame *down;
-  bool call;
+  uintptr_t ret_offset;
+  int return_bytes; /* <0: Do not return . Otherwise, number of return bytes */
 };
+typedef struct pt_regs elfp_intr_state;
 /* OS primitives*/
-extern int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *context);
+extern int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *context,elfp_intr_state_t regs);
 extern int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end);
-extern int elfp_os_copy_stack_bytes(elfp_context_t *from,elfp_context_t *to,size_t nbytes);
+extern int elfp_os_copy_stack_bytes(struct elfp_stack *from,struct elfp_stack *to,size_t nbytes,elfp_intr_state_t regs);
 extern int elfp_os_errormsg(char *message);
 extern elfp_context_t * elfp_os_context_new(elfp_process_t *tsk);
 struct elfp_stack * elfp_os_alloc_stack(elfp_process_t *tsk, size_t size);
-int elfp_os_free_stack(struct elfp_stack *stack);
-int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack);
+int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack,elfp_intr_state_t regs);
+int elfp_os_free_stack(elfp_process_t *tsk,struct elfp_stack *stack);
+
 /* VM hooks */
-extern int elfp_parse_policy(uintptr_t policy_offset_start,uintptr_t policy_size, elfp_process_t *tsk);
+extern int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_intr_state_t regs);
 extern int elfp_destroy_policy(struct elf_policy *policy);
-extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk);
-extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk,int access_type);
+extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk,elfp_intr_state_t regs);
+extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk,int access_type,elfp_intr_state_t regs);
 #endif
 #endif
