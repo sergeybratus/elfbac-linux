@@ -14,11 +14,10 @@
 #include <asm/uaccess.h>
 #include <linux/atomic.h>
 extern void __init elfp_init(void);
-
 typedef struct mm_struct elfp_context_t;
 typedef struct task_struct elfp_process_t;
 typedef atomic_t elfp_atomic_ctr_t;
-
+typedef uintptr_t elfp_os_stack;
 #define ELFP_ATOMIC_CTR_INIT(lvalue, rvalue) do { lvalue = ATOMIC_INIT(rvalue); } while(0);
 #define ELFP_LINUX_ALLOC_HELPER(type,name) \
 	extern struct kmem_cache *elfp_slab_ ## name; \

@@ -60,7 +60,7 @@ err_mem:
 	kmem_cache_free(elfp_slab_stack,retval);
 }
 int elfp_os_free_stack(elfp_stack *stack){
-
+  do_munmap(stack->os);
 }
 int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack){
   assert(0);
