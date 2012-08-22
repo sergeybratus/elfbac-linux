@@ -42,10 +42,8 @@ static inline struct elfp_state *elfp_task_get_current_state(elfp_process_t *tsk
 static inline struct elf_policy *elfp_task_get_policy(elfp_process_t *tsk){
 	return tsk->elf_policy;
 }
-#define ELFP_TASK_STACKPTR(tsk) ((tsk)->elfp_stack)
-
 void elfp_task_release_policy(struct elf_policy *policy);
-void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initial,elfp_intr_state_t regs);
+void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initial);
 int elfp_policy_get_refcount(struct elf_policy *policy);
 static inline size_t elfp_read_policy(uintptr_t off, void *outbuf,size_t size,elfp_process_t *tsk){
 	memcpy (outbuf,(void *)off,size);
