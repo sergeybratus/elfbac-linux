@@ -1211,12 +1211,13 @@ good_area:
 	if (likely(tsk->elf_policy)) {
 		if (error_code & PF_INSTR) {
 		  if (elfp_handle_instruction_address_fault(address, tsk,regs)) {
-				do_exit(SIGKILL);
+				up_read(&mm->mmap_sem);
 				return;
 			}
 			else{
 				up_read(&mm->mmap_sem);
 				do_exit(SIGKILL);
+				return;
 			}
 		} else {
 			if (elfp_handle_data_address_fault(address, tsk, (error_code
@@ -1227,6 +1228,7 @@ good_area:
 			else{
 				up_read(&mm->mmap_sem);
 				do_exit(SIGKILL);
+				return;
 			}
 		}
 	}
