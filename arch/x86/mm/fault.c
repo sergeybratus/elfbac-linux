@@ -1215,8 +1215,10 @@ good_area:
 				return;
 			}
 			else{
-				up_read(&mm->mmap_sem);
-				do_exit(SIGKILL);
+			  printk(KERN_ERR,"Killing process because of ELFBAC instruction fetch from %p\n",address);
+			  up_read(&mm->mmap_sem);
+			  bad_area_nosemaphore(regs, error_code, address);
+			  return;
 			}
 		} else {
 			if (elfp_handle_data_address_fault(address, tsk, (error_code
@@ -1225,8 +1227,10 @@ good_area:
 				return;
 			}
 			else{
-				up_read(&mm->mmap_sem);
-				do_exit(SIGKILL);
+			  printk(KERN_ERR,"Killing process because of ELFBAC data fetch from %p\n",address);
+			  up_read(&mm->mmap_sem);
+			  bad_area_nosemaphore(regs, error_code, address);
+			  return;
 			}
 		}
 	}

@@ -82,11 +82,16 @@ static int elfp_insert_data_transition(struct elfp_data_transition *data){
 		else if ((*tree)->to < data->to)
 			tree = &((*tree)->right);
 		else {/* We do not need to sort on high, but TODO: make sure they don't overlap */
-			if ( data->low< (*tree)->low )
-				tree = &((*tree)->left);
-			else {
-				tree = &((*tree)->right);
-			}
+		  if ( data->low< (*tree)->low ){
+		    if(data->high >= (*tree)->low){
+		      elfp_os_errormsg("Overlapping policy");
+		      return -EINVAL;
+		    }
+		    tree = &((*tree)->left);
+		  }
+		  else {/* TODO: overlap detection */	     
+		    tree = &((*tree)->right);
+		  }
 		}
 	}
 	*tree = data;
@@ -251,6 +256,8 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
 			else 
 			  data->high = buf.addr2;
 			data->type = buf.type;
+			if(data->high <= data->low)
+			  return -EINVAL;
 			elfp_insert_data_transition(data);
 			break;
 		}

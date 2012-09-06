@@ -101,76 +101,10 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 	return 0;
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end){
-	struct vm_area_struct *mpnt, *tmp;
-	struct mempolicy *pol;
-	int retval = 0;
-	mpnt =find_vma(from->mm, start);
-	if(!mpnt)
-		return -EINVAL;
-	if(mpnt->vm_start > start) /* not mapped */
-		return -EINVAL;
-	/* Well ordered locking, because 'to' is always a shadow mm  and
-	 * from a real address space	 */
-	down_write(&from->mm->mmap_sem);
-	/*TODO: No lock here*/
-	//down_write(&to->mmap_sem);
-	if(mpnt->vm_start < start)
-		split_vma(from->mm,mpnt,start,1);
-	/* Look at  dup_mmap  and split_vma*/
-	while(mpnt->vm_start < end){
-		struct file *file;
-		if(mpnt->vm_end >=end)
-			split_vma(from->mm,mpnt,end,0);
-		/* Dup this individual VMA*/
-		/* Split it if necessary */
-		tmp = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
-		if (!tmp)
-			goto fail_nomem;
-		*tmp = *mpnt;
-		INIT_LIST_HEAD(&tmp->anon_vma_chain);
-		pol = mpol_dup(vma_policy(mpnt));
-		retval = PTR_ERR(pol);
-		if (IS_ERR(pol))
-			goto fail_nomem_policy;
-		vma_set_policy(tmp, pol);
-		tmp->vm_mm =to;
-		if (anon_vma_fork(tmp, mpnt))
-			goto fail_nomem_anon_vma_fork;
-		tmp->vm_next = tmp->vm_prev = NULL;
-		file = tmp->vm_file;
-		/*if (file) {
-		INIT_LIST_HEAD()
-			get_file(file);*/
-			/* insert tmp into the share list, just after mpnt */
-		/*	vma_prio_tree_add(tmp, mpnt);
-		}*/
-		if (is_vm_hugetlb_page(tmp))
-			reset_vma_resv_huge_pages(tmp);
-		/*
-		 * Link in the new vma and copy the page table entries.
-		 * TODO: improve performance, see dup_mmap()
-		 */
-		insert_vm_struct(to,tmp);
-		/*mm->map_count++;*/
-		retval = copy_page_range(to,from->mm, mpnt);
-
-		if (tmp->vm_ops && tmp->vm_ops->open)
-			tmp->vm_ops->open(tmp);
-		if (retval)
-			goto out;
-		mpnt = mpnt->vm_next;
-		tmp->elfp_clone_next = to->elfp_clones;
-		to->elfp_clones = tmp->elfp_clone_next;
-	}
-	goto out;
-fail_nomem:
-fail_nomem_policy:
-fail_nomem_anon_vma_fork:
-	retval = -ENOMEM;
-out:
-	up_write(&from->mm->mmap_sem);
-	/*up_write(&to->mmap_sem);*/
-	return retval;
+  int retval;
+  //up_write(&from->mm->mmap_sem);
+  retval = vma_dup_at_addr(from->mm,to,start,end);
+  //down_write(&from->mm->mmap_sem);
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
 	if(tsk->policy)

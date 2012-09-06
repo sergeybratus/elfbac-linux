@@ -55,4 +55,5 @@ static inline void elfp_os_free_context(elfp_context_t *context){
 static inline void elfp_os_atomic_init(elfp_atomic_ctr_t *p,int val){
 	atomic_set(p,val);
 }
+int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t low,uintptr_t high);
 #endif
