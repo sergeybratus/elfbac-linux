@@ -1217,7 +1217,6 @@ good_area:
 			else{
 				up_read(&mm->mmap_sem);
 				do_exit(SIGKILL);
-				return;
 			}
 		} else {
 			if (elfp_handle_data_address_fault(address, tsk, (error_code
@@ -1228,7 +1227,6 @@ good_area:
 			else{
 				up_read(&mm->mmap_sem);
 				do_exit(SIGKILL);
-				return;
 			}
 		}
 	}

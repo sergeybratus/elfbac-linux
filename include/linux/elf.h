@@ -99,6 +99,8 @@ typedef __s64	Elf64_Sxword;
 #define DT_TEXTREL	22
 #define DT_JMPREL	23
 #define DT_ENCODING	32
+#define DT_ELFBAC       34
+#define DT_ELFBACSZ     35
 #define OLD_DT_LOOS	0x60000000
 #define DT_LOOS		0x6000000d
 #define DT_HIOS		0x6ffff000

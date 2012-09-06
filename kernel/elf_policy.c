@@ -18,10 +18,10 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
 			}*/
 		struct elfp_call_transition *transition = state->calls;
 		while(transition && (transition->offset != address)){
-			if(transition->offset < address)
-				transition = transition->left;
-			else
-				transition = transition->right;
+		  if(address < transition->offset)
+		    transition = transition->left;
+		  else
+		    transition = transition->right;
 		}
 		if(unlikely(!transition)){
 			return 0; /* Kill process */
@@ -82,7 +82,7 @@ static int elfp_insert_data_transition(struct elfp_data_transition *data){
 		else if ((*tree)->to < data->to)
 			tree = &((*tree)->right);
 		else {/* We do not need to sort on high, but TODO: make sure they don't overlap */
-			if ((*tree)->low < data->low)
+			if ( data->low< (*tree)->low )
 				tree = &((*tree)->left);
 			else {
 				tree = &((*tree)->right);
@@ -102,7 +102,7 @@ static int elfp_insert_call_transition(struct elfp_call_transition *data){
 		else if((*tree)->to < data->to)
 				tree =  &((*tree)->right);
 		else {/* We do not need to sort on high, but TODO: make sure they don't overlap */
-			if((*tree)->offset < data->offset)
+			if(  data->offset < (*tree)->offset)
 				tree = &((*tree)->left);
 			else {
 				tree =  &((*tree)->right);
@@ -174,6 +174,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
 			state->calls = NULL;
 			state->data = NULL;
 			state->context = elfp_os_context_new(tsk);
+			state->stack = NULL;
 			if(!state->context)
 				return -ENOMEM;
 			//elfp_os_copy_mapping(tsk, state->context,buf.low,buf.high);
@@ -265,7 +266,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
 				return -EIO;
 			}
 			off += sizeof buf;
-			stack =  elfp_find_state_by_id(pol,buf.stack);
+			stack =  elfp_find_stack_by_id(pol,buf.stack);
 			if(!stack){
 				elfp_free_data_transition(data);
 				elfp_os_errormsg("Stack not found\n");
@@ -330,5 +331,46 @@ int elfp_destroy_policy(struct elf_policy *policy)
 		elfp_free_state(state);
 	}
 	elfp_free_policy(policy);
+	return 0;
+}
+/* TODO: This breaks the links. At the moment this is for userspace use only*/
+int elfp_print_policy(struct elf_policy *policy,elfp_print_function print){
+
+	while(policy->states){
+		struct elfp_state *state;
+		/* Free each without allocating. Bad runtime (?)*/
+		while(policy->states->data){
+			struct elfp_data_transition **pp = &(policy->states->data);
+			while((*pp)->left)
+				pp = &(*pp)->left;
+			while((*pp)->right)
+				pp = &(*pp)->right;
+			print("state_%d to state_%d ",(*pp)->from->id,(*pp)->to->id);
+			if((*pp)->type & ELFP_RW_WRITE){
+				print ("WRITE ");
+			}
+			if((*pp)->type & ELFP_RW_READ){
+				print ("READ ");
+			}
+			if((*pp)->type & ELFP_RW_EXEC){
+				print ("EXEC ");
+			}
+			print("0x%X - 0x%X",(*pp)->low,(*pp)->high);
+			elfp_free_data_transition(*pp);
+			*pp = NULL;
+		}
+		while(policy->states->calls){
+			struct elfp_call_transition **pp = &(policy->states->calls);
+			while((*pp)->left)
+				*pp = (*pp)->left;
+			while((*pp)->right)
+				*pp = (*pp)->right;
+			print("state_%d to state_%d call ",(*pp)->from->id,(*pp)->to->id);
+			print("0x%X",(*pp)->offset);
+			*pp=NULL;
+		}
+		state = policy->states;
+		policy->states = policy->states->next;
+	}
 	return 0;
 }

@@ -219,6 +219,32 @@ extern void pcid_init();
 asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 		const void *arg, const size_t argsize) {
 	switch (function) {
+	case 0:
+		if(id!=0) return -EINVAL;
+		{
+		  long retval;
+				/*TODO: DOS much.. Refactor to use the normal read/write primitives */
+			void *elfp_buf = kmalloc(argsize,GFP_KERNEL);
+			if(!elfp_buf){
+				send_sig(SIGKILL, current, 0);
+				goto out;
+			}
+			retval = copy_from_user(elfp_buf,arg,argsize);
+
+			if (retval ) {
+				send_sig(SIGKILL, current, 0);
+				goto out;
+			}
+			retval = elfp_parse_policy((uintptr_t)arg, (uintptr_t)argsize,current,NULL); //TODO: We need to set up a special "uninitialised" state, which traps the first memory access
+			kfree(elfp_buf);
+			if(retval < 0){
+			  printk(KERN_ERR "Error parsing elfbac policy. Killing process");
+				send_sig(SIGKILL,current,0);
+				goto out;
+			}
+		}
+		out: return 0;
+		break;
 	case 500: /* DIRTY HACKS */
 		pcid_init();
 		return 0;

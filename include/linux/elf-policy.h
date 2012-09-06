@@ -21,7 +21,16 @@
 #include <linux/linkage.h>
 #include <asm/mmu_context.h>    /* switch_mm */
 #else
+#include <linux/unistd.h>
 #include <stdint.h>
+
+#ifndef PT_ELFBAC_POLICY
+#define PT_ELFBAC_POLICY 42
+#endif
+#ifndef SHT_ELFBAC
+#define SHT_ELFBAC 13
+#endif
+
 #endif
  typedef uint32_t elfp_id_t;
  typedef uint32_t elfp_chunk_header_t;
@@ -138,5 +147,8 @@ extern int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk
 extern int elfp_destroy_policy(struct elf_policy *policy);
 extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk,elfp_intr_state_t regs);
 extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk,int access_type,elfp_intr_state_t regs);
+
+typedef void (*elfp_print_function)(char *data,...);
+int elfp_print_policy(struct elf_policy *pol,elfp_print_function pfunc);
 #endif
 #endif

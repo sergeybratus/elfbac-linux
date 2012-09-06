@@ -988,6 +988,7 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	if (elf_ppnt->p_type == PT_ELFBAC_POLICY) {
 		void *elfp_buf = kmalloc(elf_ppnt->p_filesz,GFP_KERNEL);
 		if(!elfp_buf){
+			printk(KERN_ERR,"Unable to allocate buffer for ELFbac policy. Killing\n");
 			send_sig(SIGKILL, current, 0);
 			goto out;
 		}
@@ -1003,6 +1004,7 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 		retval = elfp_parse_policy((uintptr_t)elfp_buf, (uintptr_t)(elf_ppnt->p_filesz),current,regs);
 		kfree(elfp_buf);
 		if(retval < 0){
+		  printk(KERN_ERR "Error parsing elfbac policy. Killing process");
 			send_sig(SIGKILL,current,0);
 			goto out;
 		}
