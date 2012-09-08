@@ -2206,7 +2206,7 @@ config KEYS_COMPAT
 
 config ELF_POLICY
 	bool "ELF policy support" 
-	depends on X86_64
+	depends on X86_64 && MMU_NOTIFIER
 	default y
 config MM_PCID	
 	bool "Use tagged TLB(PCID) if available"

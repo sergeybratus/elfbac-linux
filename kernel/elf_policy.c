@@ -9,28 +9,43 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
 	struct elfp_state *state = elfp_task_get_current_state(tsk);
 	int retval = elfp_handle_data_address_fault(address,tsk,ELFP_RW_EXEC,regs);
 	if (!retval) { /* Handle a call */
-	  /* if(ELFP_TASK_STACKPTR(tsk) && ELFP_TASK_STACKPTR(tsk)->ret_offset == address){
-			/* Handle a return: Pop stack frame and allow 
-		  struct elfp_stack_frame *stack = ELFP_TASK_STACKPTR(tsk);
-			elfp_os_copy_stack_bytes(stack->stack,stack->to->stack,stack->returnbytes);
-			ELFP_TASK_STACKPTR(tsk) = stack->down;
-			//elfp_free_stack_frame(stack);
-			}*/
-		struct elfp_call_transition *transition = state->calls;
-		while(transition && (transition->offset != address)){
-		  if(address < transition->offset)
-		    transition = transition->left;
-		  else
-		    transition = transition->right;
-		}
-		if(unlikely(!transition)){
-			return 0; /* Kill process */
-		}
-		else{
-			elfp_os_change_context(tsk,transition->to,regs);/* TODO: Copy stack, handle return */
-			return 1;
-		}
+	   if(ELFP_TASK_STACKPTR(tsk) && ELFP_TASK_STACKPTR(tsk)->ret_offset == address)
+	     {
+	       
+	       struct elfp_stack_frame *stack = ELFP_TASK_STACKPTR(tsk);
+	       
+	       //elfp_os_copy_stack_bytes(stack->stack,stack->to->stack,stack->returnbytes);
+	       ELFP_TASK_STACKPTR(tsk) = stack->down;
+	       elfp_free_stack_frame(stack);
+	       elfp_os_change_context(tsk,stack->trans->from,regs);
+	       return 1;
+	     }
+	   struct elfp_call_transition *transition = state->calls;
+	   while(transition && (transition->offset != address)){
+	     if(address < transition->offset)
+	       transition = transition->left;
+	     else
+	       transition = transition->right;
+	   }
+	   if(unlikely(!transition)){
+	     return 0; /* Kill process */
+	   }
+	   else{
+	     if(transition->returnbytes >=0) /*If returning will be allowed*/
+	       {
+		 struct elfp_stack_frame *stack= elfp_alloc_stack_frame(); /*TODO check for oom conditions */
+		 /*TODO: Copy stack bytes */
+		 stack->down = ELFP_TASK_STACKPTR(tsk);
+		 stack->trans = transition;
+		 stack->ret_offset = elfp_os_ret_offset(regs,address);
+		 stack->returnbytes = transition->returnbytes;
+		 ELFP_TASK_STACKPTR(tsk)= stack;
+	       }
+	     elfp_os_change_context(tsk,transition->to,regs);/* TODO: Copy stack, handle return */
+	     return 1;
+	   }
 	}
+	
 	return retval; /* Fail */
 }
 /* TODO handle overlapping, etc with only different accesses */
@@ -84,7 +99,7 @@ static int elfp_insert_data_transition(struct elfp_data_transition *data){
 		else {/* We do not need to sort on high, but TODO: make sure they don't overlap */
 		  if ( data->low< (*tree)->low ){
 		    if(data->high >= (*tree)->low){
-		      elfp_os_errormsg("Overlapping policy");
+		      elfp_os_errormsg("Overlapping policy\n");
 		      return -EINVAL;
 		    }
 		    tree = &((*tree)->left);

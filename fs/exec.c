@@ -56,6 +56,7 @@
 #include <linux/oom.h>
 #include <linux/compat.h>
 #include <linux/elf-policy.h>
+#include <linux/mmu_notifier.h>
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
@@ -1542,9 +1543,11 @@ static int do_execve_common(const char *filename,
 #ifdef CONFIG_ELF_POLICY
 	{
 		/* save ELF policy state, wipe it  before and restore on failure */
-		struct elfp_policy *old_pol = current->elf_policy;
+		struct elf_policy *old_pol = current->elf_policy;
 		struct mm_struct *elf_policy_mm = current->elf_policy_mm;
 		struct elfp_state *elfp_current = current->elfp_current;
+		if(old_pol)
+			mmu_notifier_unregister(&elfp_mmu_notifier,current->mm);
 		current->elf_policy = NULL;
 		current->elf_policy_mm = NULL;
 		current->elfp_current = NULL;
@@ -1555,6 +1558,8 @@ static int do_execve_common(const char *filename,
 		current->elf_policy= old_pol;  /* restore state */
 		current->elf_policy_mm = elf_policy_mm;
 		current->elfp_current =elfp_current;
+		if(old_pol)
+			mmu_notifier_register(&elfp_mmu_notifier,current->mm);
 #endif
 		goto out;
 	}

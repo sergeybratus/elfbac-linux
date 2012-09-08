@@ -501,7 +501,10 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 	mm->cached_hole_size = ~0UL;
 	mm_init_aio(mm);
 	mm_init_owner(mm, p);
-
+	#ifdef CONFIG_ELF_POLICY
+	mm->elfp_clones = NULL;
+	mm->elfp_clones_next = NULL;
+       	#endif
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
 		mmu_notifier_mm_init(mm);

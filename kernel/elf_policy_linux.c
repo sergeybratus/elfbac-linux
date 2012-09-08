@@ -40,7 +40,7 @@
 
 #include <linux/elf-policy.h>
 
-struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack;
+struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack,*elfp_slab_stack_frame;
 
 void __init elfp_init(void) {
 	elfp_slab_state =  kmem_cache_create("elfp_state",
@@ -52,7 +52,39 @@ void __init elfp_init(void) {
 	elfp_slab_data_transition =  kmem_cache_create("elfp_policy_data_transition",
 			sizeof(struct elfp_data_transition), 0, 0, NULL);
 	elfp_slab_stack = kmem_cache_create("elfp_stack",sizeof(struct elfp_state),0,0,NULL);
+	elfp_slab_stack_frame = kmem_cache_create("elfp_stack_frame",sizeof(struct elfp_stack_frame),0,0,NULL);
 }
+static void elfp_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
+				      struct mm_struct *mm,
+				      unsigned long address){
+	if(mm->elfp_clones){
+		struct mm_struct *clone = mm->elfp_clones;
+		while(clone){
+			do_munmap(clone,PAGE_ALIGN(address),PAGE_SIZE);
+			clone = clone->elfp_clones_next;
+		}
+	}
+}
+static void elfp_mmu_notifier_invalidate_range(struct mmu_notifier *mn,
+				      struct mm_struct *mm,
+					unsigned long start,unsigned long end){
+	BUG_ON(start>=end);
+	if(mm->elfp_clones){
+		struct mm_struct *clone = mm->elfp_clones;
+		while(clone){
+			do_munmap(clone,start,end-start);
+			clone = clone->elfp_clones_next;
+		}
+	}
+		
+}
+static const struct mmu_notifier_ops elfp_mmu_notifier_ops = {
+	.invalidate_page  = elfp_mmu_notifier_invalidate_page,
+	.invalidate_range_end = elfp_mmu_notifier_invalidate_range,
+};
+struct mmu_notifier elfp_mmu_notifier = {
+	.ops = &elfp_mmu_notifier_ops,
+};
 struct elfp_stack * elfp_os_alloc_stack(elfp_process_t *tsk, size_t size){
 	struct elfp_stack *retval = kmem_cache_alloc(elfp_slab_stack,GFP_KERNEL);
 	down_write(&tsk->mm->mmap_sem);
@@ -104,17 +136,24 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
   int retval;
   //up_write(&from->mm->mmap_sem);
   retval = vma_dup_at_addr(from->mm,to,start,end);
+  return retval;
   //down_write(&from->mm->mmap_sem);
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
+	int have_mmu_notifier = 0;
 	if(tsk->policy)
 		elfp_task_release_policy(tsk->elf_policy);
+	else
+		have_mmu_notifier = 1;
 	if(initialstate->policy != policy)
 		panic("ELF policy initial state doesn't belong to policy. Logic error\n");
+
 	tsk->elf_policy = policy;
 	tsk->elf_policy_mm = tsk->active_mm;
 	tsk->elfp_current = initialstate;
 	elfp_os_change_context(tsk,initialstate,regs);
+	if(!have_mmu_notifier)
+		mmu_notifier_register(&elfp_mmu_notifier,tsk->mm);
 	atomic_inc(&(policy->refs));
 }
 void elfp_task_release_policy(struct elf_policy *policy){
@@ -130,24 +169,35 @@ int elfp_policy_get_refcount(struct elf_policy *policy){
 	return atomic_read(&(policy->refs));
 }
 elfp_context_t * elfp_os_context_new(struct task_struct *tsk){
+
 	elfp_context_t *retval;
 	if(tsk != current){
 		printk(KERN_ERR "elfp_os_context_new: Called with non-current task\n");
 		return NULL;
 	}
 	retval=dup_mm(current);
-	 /* SO BAD!!! */
-	if(retval){
-		struct vm_area_struct *vma = retval->mmap;
-		uintptr_t start = vma->vm_start;
-		if(!vma)
-			return NULL;
-		while(vma->vm_next  && vma->vm_next->vm_end <= TASK_SIZE){
-			vma = vma->vm_next;
-		}
-		do_munmap(retval,start,vma->vm_end - start);
+	if(!retval){
+		return NULL;
 	}
+	down_write(&current->mm->mmap_sem);
+	retval->elfp_clones_next = current->mm->elfp_clones;
+	current->mm->elfp_clones = retval;
+	up_write(&current->mm->mmap_sem);
+	
+	 /* SO BAD!!! */
+	struct vm_area_struct *vma = retval->mmap;
+	uintptr_t start = vma->vm_start;
+	if(!vma)
+		return NULL;
+	while(vma->vm_next  && vma->vm_next->vm_end <= TASK_SIZE){
+		vma = vma->vm_next;
+	}
+	do_munmap(retval,start,vma->vm_end - start);
+
 	return retval;
+}
+uintptr_t elfp_os_ret_offset(elfp_intr_state_t regs,uintptr_t ip){
+  return regs->ax; /* X86-64 stores return address in RAX*/
 }
 extern void pcid_init();
 asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,

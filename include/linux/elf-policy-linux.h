@@ -33,9 +33,11 @@ typedef unsigned long elfp_os_stack; //Stack pointer
 	}
 ELFP_LINUX_ALLOC_HELPER(elf_policy,policy);
 ELFP_LINUX_ALLOC_HELPER(elfp_state,state);
+ELFP_LINUX_ALLOC_HELPER(elfp_stack_frame,stack_frame);
 ELFP_LINUX_ALLOC_HELPER(elfp_call_transition,call_transition);
 ELFP_LINUX_ALLOC_HELPER(elfp_data_transition,data_transition);
 #undef ELFP_LINUX_ALLOC_HELPER
+#define ELFP_TASK_STACKPTR(tsk) ((tsk)->elfp_stack)
 static inline struct elfp_state *elfp_task_get_current_state(elfp_process_t *tsk){
 	return tsk->elfp_current;
 }
@@ -55,5 +57,9 @@ static inline void elfp_os_free_context(elfp_context_t *context){
 static inline void elfp_os_atomic_init(elfp_atomic_ctr_t *p,int val){
 	atomic_set(p,val);
 }
-int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t low,uintptr_t high);
+/*TODO add other options*/
+extern uintptr_t elfp_os_ret_offset(elfp_intr_state_t regs,uintptr_t ip);
+
+extern int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t low,uintptr_t high);
+extern struct mmu_notifier elfp_mmu_notifier;
 #endif

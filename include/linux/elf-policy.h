@@ -72,8 +72,8 @@ struct elfp_desc_call{
 	elfp_id_t from;
 	elfp_id_t to;
 	uintptr_t offset;/*offset is within the code range of to*/
-	uint16_t parambytes;
-	uint16_t returnbytes;
+	int16_t parambytes;
+	int16_t returnbytes;
 }__attribute__ ((__packed__));
 struct elfp_desc_stackaccess{
   elfp_chunk_header_t chunktype;
@@ -114,8 +114,8 @@ struct elfp_call_transition{
 	struct elfp_call_transition *left,*right; /* Sorted by 'from', the 'to' */
 	struct elfp_state *from,*to;
 	uintptr_t offset;
-	unsigned short parambytes;
-	unsigned short returnbytes;
+	short parambytes;
+	short returnbytes; /* <0: Do not return . Otherwise, number of return bytes */
 	struct elfp_call_transition *next;
 };
 struct elfp_data_transition {
@@ -129,7 +129,7 @@ struct elfp_stack_frame{
   struct elfp_call_transition *trans;
   struct elfp_stack_frame *down;
   uintptr_t ret_offset;
-  int return_bytes; /* <0: Do not return . Otherwise, number of return bytes */
+  int returnbytes;
 };
 typedef struct pt_regs elfp_intr_state;
 /* OS primitives*/

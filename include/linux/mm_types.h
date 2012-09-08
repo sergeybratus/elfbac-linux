@@ -287,7 +287,6 @@ struct task_rss_stat {
 struct mm_rss_stat {
 	atomic_long_t count[NR_MM_COUNTERS];
 };
-
 struct mm_struct {
 	struct vm_area_struct * mmap;		/* list of VMAs */
 	struct rb_root mm_rb;
@@ -392,7 +391,8 @@ struct mm_struct {
 	struct cpumask cpumask_allocation;
 #endif
 #ifdef CONFIG_ELF_POLICY
-	struct vm_area_struct *elfp_clones;
+	struct mm_struct  *elfp_clones;
+	struct mm_struct *elfp_clones_next;
 #endif
 };
 
