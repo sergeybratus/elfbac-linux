@@ -3866,8 +3866,20 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr,
 {
 	struct mm_struct *mm;
 	int ret;
-
-	mm = get_task_mm(tsk);
+#ifdef CONFIG_ELF_POLICY
+	if(tsk->elf_policy_mm)
+	{ /* from get_task_mm */
+		task_lock(tsk);
+		mm = tsk->elf_policy_mm;
+		if(tsk->flags & PF_KTHREAD)
+			mm = NULL;
+		else
+			atomic_inc(&mm->mm_users);
+		task_unlock(tsk);
+	}
+	else
+#endif
+		mm = get_task_mm(tsk);
 	if (!mm)
 		return 0;
 
