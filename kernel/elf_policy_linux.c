@@ -109,9 +109,11 @@ int elfp_os_free_stack(elfp_process_t *tsk,struct elfp_stack *stack){
 	return 0;
 }
 int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack,elfp_intr_state_t regs){
+	/*
 	elfp_task_get_current_state(tsk)->stack->os = regs->sp;
 	regs->sp = stack->os;
 	this_cpu_write(old_rsp, stack->os);
+	*/
 	return 0;
 }
 int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_intr_state_t regs){
@@ -126,7 +128,7 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 	tsk->elf_policy_mm = state->context;
 	if(state->stack){
 	  elfp_os_change_stack(tsk,state->stack,regs);
-	}
+	 }
 	switch_mm(oldmm,tsk->elf_policy_mm,tsk);
 	//local_irq_enable();
 	spin_unlock(&(tsk->alloc_lock));
@@ -140,11 +142,11 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
   //down_write(&from->mm->mmap_sem);
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
-	int have_mmu_notifier = 0;
+	int have_mmu_notifier = 1;
 	if(tsk->policy)
 		elfp_task_release_policy(tsk->elf_policy);
 	else
-		have_mmu_notifier = 1;
+		have_mmu_notifier = 0;
 	if(initialstate->policy != policy)
 		panic("ELF policy initial state doesn't belong to policy. Logic error\n");
 
@@ -152,8 +154,8 @@ void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct 
 	tsk->elf_policy_mm = tsk->active_mm;
 	tsk->elfp_current = initialstate;
 	elfp_os_change_context(tsk,initialstate,regs);
-	if(!have_mmu_notifier)
-		mmu_notifier_register(&elfp_mmu_notifier,tsk->mm);
+//	if(!have_mmu_notifier)
+//		mmu_notifier_register(&elfp_mmu_notifier,tsk->mm);
 	atomic_inc(&(policy->refs));
 }
 void elfp_task_release_policy(struct elf_policy *policy){
