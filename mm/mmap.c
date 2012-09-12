@@ -2702,9 +2702,11 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	if(mpnt->vm_start < start)
 	  split_vma(from,mpnt,start,1);
 	while(mpnt->vm_start < end){
+	  unsigned long  vma_flags = mpnt->vm_flags;
 	  if(mpnt->vm_end > end){
 	    split_vma(from,mpnt,end,0);
 	  }
+	  mpnt->vm_flags |= VM_SHARED;
 	  tmp = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	  if (!tmp) {
 	    printk(KERN_ERR"elf_policy: Out of memory allocating vma\n");
@@ -2724,25 +2726,24 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	    retval=-ENOMEM;
 	    goto out;
 	  }
+	  /* tmp->vm_flags &= VM_SHARED; /* Necessary, so we don't build a COW flag*/
 	  tmp->vm_next = tmp->vm_prev = NULL;
+	  tmp->vm_flags |= VM_ELFP_CLONE;
 	  file = tmp->vm_file;
 	  if (file) {
-	    struct inode *inode = file->f_path.dentry->d_inode;
-	    struct address_space *mapping = file->f_mapping;
-	    /*
-	    get_file(file);
-	    if (tmp->vm_flags & VM_DENYWRITE)
-	      atomic_dec(&inode->i_writecount);
-	    mutex_lock(&mapping->i_mmap_mutex);
-	    if (tmp->vm_flags & VM_SHARED)
-	    mapping->i_mmap_writable++;
-	    flush_dcache_mmap_lock(mapping);
-	    /* insert tmp into the share list, just after mpnt */
-	    /*
-	    vma_prio_tree_add(tmp, mpnt);
-	    flush_dcache_mmap_unlock(mapping);
-	    mutex_unlock(&mapping->i_mmap_mutex);
-	  */ 
+		  struct inode *inode = file->f_path.dentry->d_inode;
+		  struct address_space *mapping = file->f_mapping;
+		  
+		  /*et_file(file);
+		  if (tmp->vm_flags & VM_DENYWRITE)
+			  atomic_dec(&inode->i_writecount);
+		  if (tmp->vm_flags & VM_SHARED)
+			  mapping->i_mmap_writable++;
+		  flush_dcache_mmap_lock(mapping);
+		  /* insert tmp into the share list, just after mpnt 
+		  vma_prio_tree_add(tmp, mpnt);
+		  flush_dcache_mmap_unlock(mapping);
+		  mutex_unlock(&mapping->i_mmap_mutex); */
 	  }
 	  /*
 	   * Clear hugetlb-related page reserves for children. This only
@@ -2762,10 +2763,10 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	      retval = -EINVAL;
 	      goto out;
 	    }
-
 	  vma_link(to, tmp, prev,rb_link, rb_parent);
 	  to->map_count++;
 	  copy_page_range(to, from, mpnt);
+	  mpnt->vm_flags = vma_flags;
 	  mpnt = mpnt->vm_next;
 	  if(unlikely(!mpnt))
 	    break;

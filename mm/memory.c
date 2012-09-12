@@ -57,6 +57,7 @@
 #include <linux/swapops.h>
 #include <linux/elf.h>
 #include <linux/gfp.h>
+#include <linux/elf-policy.h>
 
 #include <asm/io.h>
 #include <asm/pgalloc.h>
@@ -710,7 +711,8 @@ static void print_bad_pte(struct vm_area_struct *vma, unsigned long addr,
 
 static inline int is_cow_mapping(vm_flags_t flags)
 {
-	return (flags & (VM_SHARED | VM_MAYWRITE)) == VM_MAYWRITE;
+	
+	return (flags & (VM_SHARED | VM_MAYWRITE)) == VM_MAYWRITE && !(flags & VM_ELFP_CLONE);
 }
 
 #ifndef is_zero_pfn
@@ -2515,7 +2517,7 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		 * accounting on raw pfn maps.
 		 */
 		if ((vma->vm_flags & (VM_WRITE|VM_SHARED)) ==
-				     (VM_WRITE|VM_SHARED))
+			(VM_WRITE|VM_SHARED) || (vma->vm_flags & VM_ELFP_CLONE))
 			goto reuse;
 		goto gotten;
 	}
@@ -2549,7 +2551,7 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		}
 		unlock_page(old_page);
 	} else if (unlikely((vma->vm_flags & (VM_WRITE|VM_SHARED)) ==
-					(VM_WRITE|VM_SHARED))) {
+				(VM_WRITE|VM_SHARED)|| (vma->vm_flags == VM_ELFP_CLONE))) {
 		/*
 		 * Only catch write-faults on shared writable pages,
 		 * read-only shared pages can get COWed by
@@ -3192,7 +3194,7 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * If we do COW later, allocate page befor taking lock_page()
 	 * on the file cache page. This will reduce lock holding time.
 	 */
-	if ((flags & FAULT_FLAG_WRITE) && !(vma->vm_flags & VM_SHARED)) {
+	if ((flags & FAULT_FLAG_WRITE) && !(vma->vm_flags & (VM_SHARED| VM_ELFP_CLONE))) {
 
 		if (unlikely(anon_vma_prepare(vma)))
 			return VM_FAULT_OOM;
@@ -3239,7 +3241,7 @@ static int __do_fault(struct mm_struct *mm, struct vm_area_struct *vma,
 	 */
 	page = vmf.page;
 	if (flags & FAULT_FLAG_WRITE) {
-		if (!(vma->vm_flags & VM_SHARED)) {
+		if (!(vma->vm_flags & (VM_SHARED|VM_ELFP_CLONE))) {
 			page = cow_page;
 			anon = 1;
 			copy_user_highpage(page, vmf.page, address, vma);
@@ -3794,7 +3796,7 @@ static int __access_remote_vm(struct task_struct *tsk, struct mm_struct *mm,
 		int bytes, ret, offset;
 		void *maddr;
 		struct page *page = NULL;
-
+			     
 		ret = get_user_pages(tsk, mm, addr, 1,
 				write, 1, &page, &vma);
 		if (ret <= 0) {
@@ -3866,19 +3868,36 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr,
 {
 	struct mm_struct *mm;
 	int ret;
-#ifdef CONFIG_ELF_POLICY
+
+//#ifdef CONFIG_ELF_POLICY_PTRACE
 	if(tsk->elf_policy_mm)
 	{ /* from get_task_mm */
-		task_lock(tsk);
+		struct vm_area_struct *vma;
+retry:		task_lock(tsk);
 		mm = tsk->elf_policy_mm;
 		if(tsk->flags & PF_KTHREAD)
 			mm = NULL;
 		else
 			atomic_inc(&mm->mm_users);
+		vma = find_vma(mm,addr);
 		task_unlock(tsk);
+		//TODO: We just violate our policy here.
+		 if(!vma || vma->vm_start > addr+len)
+		{
+			/*	if(elfp_handle_data_address_fault(addr,tsk,write ? ELFP_RW_WRITE : ELFP_RW_READ,NULL))
+				goto retry;
+				else */
+			vma = find_vma(tsk->mm,addr);
+			if(vma && vma->vm_start <= addr+len){
+				//elfp_os_copy_mapping(tsk,mm,addr,addr+len);
+				printk(KERN_ERR " Debugging with non-ELFBAC page %p", addr);
+				mmput(mm);
+				mm= get_task_mm(tsk);
+			}
+		} 
 	}
 	else
-#endif
+//#endif 
 		mm = get_task_mm(tsk);
 	if (!mm)
 		return 0;
