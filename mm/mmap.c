@@ -2706,7 +2706,7 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	  if(mpnt->vm_end > end){
 	    split_vma(from,mpnt,end,0);
 	  }
-	  mpnt->vm_flags |= VM_SHARED;
+	  mpnt->vm_flags |= VM_SHARED | VM_ELFP_CLONE;
 	  tmp = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	  if (!tmp) {
 	    printk(KERN_ERR"elf_policy: Out of memory allocating vma\n");
@@ -2767,6 +2767,7 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	  to->map_count++;
 	  copy_page_range(to, from, mpnt);
 	  mpnt->vm_flags = vma_flags;
+	  mpnt->vm_flags |= VM_SHARED;
 	  mpnt = mpnt->vm_next;
 	  if(unlikely(!mpnt))
 	    break;

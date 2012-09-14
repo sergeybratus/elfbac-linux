@@ -2526,7 +2526,7 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct *vma,
 	 * Take out anonymous pages first, anonymous shared vmas are
 	 * not dirty accountable.
 	 */
-	if (PageAnon(old_page) && !PageKsm(old_page)) {
+	if (PageAnon(old_page) && !PageKsm(old_page) && !(vma->vm_flags & VM_ELFP_CLONE) ) {
 		if (!trylock_page(old_page)) {
 			page_cache_get(old_page);
 			pte_unmap_unlock(page_table, ptl);
@@ -2551,7 +2551,7 @@ static int do_wp_page(struct mm_struct *mm, struct vm_area_struct *vma,
 		}
 		unlock_page(old_page);
 	} else if (unlikely((vma->vm_flags & (VM_WRITE|VM_SHARED)) ==
-				(VM_WRITE|VM_SHARED)|| (vma->vm_flags == VM_ELFP_CLONE))) {
+				(VM_WRITE|VM_SHARED)|| ((vma->vm_flags & (VM_WRITE|VM_ELFP_CLONE)) == (VM_WRITE|VM_ELFP_CLONE)) )) {
 		/*
 		 * Only catch write-faults on shared writable pages,
 		 * read-only shared pages can get COWed by
