@@ -1014,12 +1014,7 @@ do_page_fault(struct pt_regs *regs, unsigned long error_code)
 					(write ? FAULT_FLAG_WRITE : 0);
 
 	tsk = current;
-#ifdef CONFIG_ELF_POLICY
-	if(likely(tsk->elf_policy_mm))
-		mm = tsk->elf_policy_mm;
-	else
-#endif
-		mm = tsk->mm;
+	mm = tsk->mm;
 
 	/* Get the faulting address: */
 	address = read_cr2();

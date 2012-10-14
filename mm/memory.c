@@ -3869,7 +3869,7 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr,
 	struct mm_struct *mm;
 	int ret;
 
-//#ifdef CONFIG_ELF_POLICY_PTRACE
+#ifdef CONFIG_ELF_POLICY_PTRACE
 	if(tsk->elf_policy_mm)
 	{ /* from get_task_mm */
 		struct vm_area_struct *vma;
@@ -3897,8 +3897,11 @@ retry:		task_lock(tsk);
 		} 
 	}
 	else
-//#endif 
+#endif 
 		mm = get_task_mm(tsk);
+#ifdef CONFIG_ELF_POLICY
+	elfp_os_invalidate_clones(mm,addr,addr+len);
+#endif
 	if (!mm)
 		return 0;
 

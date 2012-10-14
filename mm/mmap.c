@@ -2690,8 +2690,9 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	struct mempolicy *pol;
 
 	struct file *file;
+	BUG_ON(!to);
 	mpnt = find_vma(from,start);
-	if(unlikely(!mpnt) || mpnt->vm_start > start) /* Start not mapped */
+	if(unlikely(!mpnt) || mpnt->vm_start > end) /* Start not mapped */
 	  {
 	    retval=-EINVAL;
 	    goto out;
@@ -2706,7 +2707,7 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	  if(mpnt->vm_end > end){
 	    split_vma(from,mpnt,end,0);
 	  }
-	  mpnt->vm_flags |= VM_SHARED | VM_ELFP_CLONE;
+	  mpnt->vm_flags |=  VM_ELFP_CLONE;
 	  tmp = kmem_cache_alloc(vm_area_cachep, GFP_KERNEL);
 	  if (!tmp) {
 	    printk(KERN_ERR"elf_policy: Out of memory allocating vma\n");
@@ -2721,11 +2722,11 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	    goto out;
 	  }
 	  vma_set_policy(tmp, pol);
-	  tmp->vm_mm = to;
 	  if (anon_vma_clone(tmp, mpnt)){
 	    retval=-ENOMEM;
 	    goto out;
 	  }
+	  tmp->vm_mm = to;
 	  /* tmp->vm_flags &= VM_SHARED; /* Necessary, so we don't build a COW flag*/
 	  tmp->vm_next = tmp->vm_prev = NULL;
 	  tmp->vm_flags |= VM_ELFP_CLONE;
@@ -2767,7 +2768,7 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	  to->map_count++;
 	  copy_page_range(to, from, mpnt);
 	  mpnt->vm_flags = vma_flags;
-	  mpnt->vm_flags |= VM_SHARED;
+	  //mpnt->vm_flags |= VM_SHARED;
 	  mpnt = mpnt->vm_next;
 	  if(unlikely(!mpnt))
 	    break;

@@ -61,5 +61,9 @@ static inline void elfp_os_atomic_init(elfp_atomic_ctr_t *p,int val){
 extern uintptr_t elfp_os_ret_offset(elfp_intr_state_t regs,uintptr_t ip);
 
 extern int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t low,uintptr_t high);
+extern elfp_context_t * dup_mm_empty(struct task_struct *tsk);
+extern void elfp_os_invalidate_clones(struct mm_struct *mm,
+				unsigned long start, unsigned long end);
 extern struct mmu_notifier elfp_mmu_notifier;
+#define elfp_os_errormsg printk
 #endif

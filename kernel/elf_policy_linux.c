@@ -65,9 +65,8 @@ static void elfp_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 		}
 	}
 }
-static void elfp_mmu_notifier_invalidate_range(struct mmu_notifier *mn,
-				      struct mm_struct *mm,
-					unsigned long start,unsigned long end){
+void elfp_os_invalidate_clones(struct mm_struct *mm,
+			unsigned long start, unsigned long end){
 	BUG_ON(start>=end);
 	if(mm->elfp_clones){
 		struct mm_struct *clone = mm->elfp_clones;
@@ -76,6 +75,11 @@ static void elfp_mmu_notifier_invalidate_range(struct mmu_notifier *mn,
 			clone = clone->elfp_clones_next;
 		}
 	}
+}
+static void elfp_mmu_notifier_invalidate_range(struct mmu_notifier *mn,
+				      struct mm_struct *mm,
+					unsigned long start,unsigned long end){
+	elfp_os_invalidate_clones(mm,start,end);
 		
 }
 static const struct mmu_notifier_ops elfp_mmu_notifier_ops = {
@@ -134,11 +138,72 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 	spin_unlock(&(tsk->alloc_lock));
 	return 0;
 }
-int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end){
-  int retval;
-  //up_write(&from->mm->mmap_sem);
-  retval = vma_dup_at_addr(from->mm,to,start,end);
-  return retval;
+int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end, unsigned short type){
+	int retval;	
+	int error = 0;
+	unsigned long vm_flags, nstart, tmp, reqprot;
+	struct vm_area_struct *vma, *prev;
+	//up_write(&from->mm->mmap_sem);
+	retval = vma_dup_at_addr(from->mm,to,start,end);
+	//return retval;
+	unsigned long prot = 0 ;
+	if(type & ELFP_RW_READ)
+		prot |= PROT_READ;
+	if(type & ELFP_RW_WRITE)
+		prot |= PROT_WRITE;
+	if(type & ELFP_RW_EXEC)
+		prot |= PROT_EXEC;
+	reqprot = prot;
+	vm_flags = calc_vm_prot_bits(prot);	vma = find_vma(current->mm, start);
+	error = -ENOMEM;
+	vma = find_vma(to, start);
+	if (!vma)
+		goto out;
+	prev = vma->vm_prev;
+	
+	if (vma->vm_start > start)
+		goto out;
+	if (start > vma->vm_start)
+		prev = vma;
+
+	for (nstart = start ; ; ) {
+		unsigned long newflags;
+
+		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
+
+		newflags = vm_flags | (vma->vm_flags & ~(VM_READ | VM_WRITE | VM_EXEC));
+
+		/* newflags >> 4 shift VM_MAY% in place of VM_% */
+		if ((newflags & ~(newflags >> 4)) & (VM_READ | VM_WRITE | VM_EXEC)) {
+			error = -EACCES;
+			goto out;
+		}
+
+		error = security_file_mprotect(vma, reqprot, prot);
+		if (error)
+			goto out;
+
+		tmp = vma->vm_end;
+		if (tmp > end)
+			tmp = end;
+		error = mprotect_fixup(vma, &prev, nstart, tmp, newflags);
+		if (error)
+			goto out;
+		nstart = tmp;
+
+		if (nstart < prev->vm_end)
+			nstart = prev->vm_end;
+		if (nstart >= end)
+			goto out;
+
+		vma = prev->vm_next;
+		if (!vma || vma->vm_start != nstart) {
+			error = -ENOMEM;
+			goto out;
+		}
+	}
+out:
+	return retval;
   //down_write(&from->mm->mmap_sem);
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
@@ -163,92 +228,10 @@ void elfp_task_release_policy(struct elf_policy *policy){
                        elfp_destroy_policy(policy);
        }
 }
-int elfp_os_errormsg(char *message){
-	printk(message);
-	return 0;
-}
 int elfp_policy_get_refcount(struct elf_policy *policy){
 	return atomic_read(&(policy->refs));
 }
-static int dup_mmap_empty(struct mm_struct *mm, struct mm_struct *oldmm){
-	int retval;
 
-	down_write(&oldmm->mmap_sem);
-	flush_cache_dup_mm(oldmm);
-	/*
-	 * Not linked in yet - no deadlock potential:
-	 */
-	down_write_nested(&mm->mmap_sem, SINGLE_DEPTH_NESTING);
-
-	mm->locked_vm = 0;
-	mm->mmap = NULL;
-	mm->mmap_cache = NULL;
-	mm->free_area_cache = oldmm->mmap_base;
-	mm->cached_hole_size = ~0UL;
-	mm->map_count = 0;
-	cpumask_clear(mm_cpumask(mm));
-	mm->mm_rb = RB_ROOT;
-	retval = ksm_fork(mm, oldmm);
-	if (retval)
-		goto out;
-	retval = khugepaged_fork(mm, oldmm);
-	if (retval)
-		goto out;
-	/* a new mm has just been created */
-	arch_dup_mmap(oldmm, mm);
-	retval = 0;
-out:
-	up_write(&mm->mmap_sem);
-	flush_tlb_mm(oldmm);
-	up_write(&oldmm->mmap_sem);
-	return retval;
-}
-void dup_mm_empty(struct task_struct *tsk){ 
-	struct mm_struct *mm, *oldmm = current->mm;
-	int err;
-
-	if (!oldmm)
-		return NULL;
-	mm = allocate_mm();
-	if (!mm)
-		goto fail_nomem;
-	memcpy(mm, oldmm, sizeof(*mm));
-	mm_init_cpumask(mm);
-	/* Initializing for Swap token stuff */
-	mm->token_priority = 0;
-	mm->last_interval = 0;
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	mm->pmd_huge_pte = NULL;
-#endif
-	if (!mm_init(mm, tsk))
-		goto fail_nomem;
-	if (init_new_context(tsk, mm))
-		goto fail_nocontext;
-	dup_mm_exe_file(oldmm, mm);
-	err = dup_mmap_empty(mm, oldmm);
-	if (err)
-		goto free_pt;
-	mm->hiwater_rss = get_mm_rss(mm);
-	mm->hiwater_vm = mm->total_vm;
-	if (mm->binfmt && !try_module_get(mm->binfmt->module))
-		goto free_pt;
-	return mm;
-free_pt:
-	/* don't put binfmt in mmput, we haven't got module yet */
-	mm->binfmt = NULL;
-	mmput(mm);
-fail_nomem:
-	return NULL;
-fail_nocontext:
-	/*
-	 * If init_new_context() failed, we cannot use mmput() to free the mm
-	 * because it calls destroy_context()
-	 */
-	mm_free_pgd(mm);
-	free_mm(mm);
-	return NULL;
-}
-/* Cannibalised from fork.c */
 elfp_context_t * elfp_os_context_new(struct task_struct *tsk){
 
 	elfp_context_t *mm;
@@ -257,6 +240,9 @@ elfp_context_t * elfp_os_context_new(struct task_struct *tsk){
 		return NULL;
 	}
 	mm= dup_mm_empty(tsk);
+	down_write(&tsk->mm->mmap_sem);
+	tsk->mm->elfp_clones = mm;
+	up_write(&tsk->mm->mmap_sem);
 	return mm;
 }
 uintptr_t elfp_os_ret_offset(elfp_intr_state_t regs,uintptr_t ip){

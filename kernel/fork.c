@@ -67,7 +67,7 @@
 #include <linux/oom.h>
 #include <linux/khugepaged.h>
 #include <linux/signalfd.h>
-
+#include <linux/elf-policy.h>
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
@@ -170,6 +170,11 @@ void free_task(struct task_struct *tsk)
 	free_thread_info(tsk->stack);
 	rt_mutex_debug_task_free(tsk);
 	ftrace_graph_exit_task(tsk);
+#ifdef CONFIG_ELF_POLICY
+	if(tsk->elf_policy)
+		elfp_task_release_policy(tsk->elf_policy);
+	tsk->elf_policy = NULL;
+#endif
 	free_task_struct(tsk);
 }
 EXPORT_SYMBOL(free_task);
@@ -1841,4 +1846,82 @@ int unshare_files(struct files_struct **displaced)
 	task->files = copy;
 	task_unlock(task);
 	return 0;
+}
+static int dup_mmap_empty(struct mm_struct *mm, struct mm_struct *oldmm){
+	int retval;
+
+	down_write(&oldmm->mmap_sem);
+	flush_cache_dup_mm(oldmm);
+	/*
+	 * Not linked in yet - no deadlock potential:
+	 */
+	down_write_nested(&mm->mmap_sem, SINGLE_DEPTH_NESTING);
+
+	mm->locked_vm = 0;
+	mm->mmap = NULL;
+	mm->mmap_cache = NULL;
+	mm->free_area_cache = oldmm->mmap_base;
+	mm->cached_hole_size = ~0UL;
+	mm->map_count = 0;
+	cpumask_clear(mm_cpumask(mm));
+	mm->mm_rb = RB_ROOT;
+	retval = ksm_fork(mm, oldmm);
+	if (retval)
+		goto out;
+	retval = khugepaged_fork(mm, oldmm);
+	if (retval)
+		goto out;
+	/* a new mm has just been created */
+	arch_dup_mmap(oldmm, mm);
+	retval = 0;
+out:
+	up_write(&mm->mmap_sem);
+	flush_tlb_mm(oldmm);
+	up_write(&oldmm->mmap_sem);
+	return retval;
+}
+struct mm_struct * dup_mm_empty(struct task_struct *tsk){ 
+	struct mm_struct *mm, *oldmm = current->mm;
+	int err;
+
+	if (!oldmm)
+		return NULL;
+	mm = allocate_mm();
+	if (!mm)
+		goto fail_nomem;
+	memcpy(mm, oldmm, sizeof(*mm));
+	mm_init_cpumask(mm);
+	/* Initializing for Swap token stuff */
+	mm->token_priority = 0;
+	mm->last_interval = 0;
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	mm->pmd_huge_pte = NULL;
+#endif
+	if (!mm_init(mm, tsk))
+		goto fail_nomem;
+	if (init_new_context(tsk, mm))
+		goto fail_nocontext;
+	dup_mm_exe_file(oldmm, mm);
+	err = dup_mmap_empty(mm, oldmm);
+	if (err)
+		goto free_pt;
+	mm->hiwater_rss = get_mm_rss(mm);
+	mm->hiwater_vm = mm->total_vm;
+	if (mm->binfmt && !try_module_get(mm->binfmt->module))
+		goto free_pt;
+	return mm;
+free_pt:
+	/* don't put binfmt in mmput, we haven't got module yet */
+	mm->binfmt = NULL;
+	mmput(mm);
+fail_nomem:
+	return NULL;
+fail_nocontext:
+	/*
+	 * If init_new_context() failed, we cannot use mmput() to free the mm
+	 * because it calls destroy_context()
+	 */
+	mm_free_pgd(mm);
+	free_mm(mm);
+	return NULL;
 }

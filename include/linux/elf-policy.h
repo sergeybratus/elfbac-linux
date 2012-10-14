@@ -134,9 +134,9 @@ struct elfp_stack_frame{
 typedef struct pt_regs elfp_intr_state;
 /* OS primitives*/
 extern int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *context,elfp_intr_state_t regs);
-extern int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end);
+extern int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end,unsigned short type);
 extern int elfp_os_copy_stack_bytes(struct elfp_stack *from,struct elfp_stack *to,size_t nbytes,elfp_intr_state_t regs);
-extern int elfp_os_errormsg(char *message);
+// extern int elfp_os_errormsg(char *message);
 extern elfp_context_t * elfp_os_context_new(elfp_process_t *tsk);
 struct elfp_stack * elfp_os_alloc_stack(elfp_process_t *tsk, size_t size);
 int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack,elfp_intr_state_t regs);

@@ -60,7 +60,7 @@ int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int ac
 	}
 	if(transition && transition->type & access_type){
 		if(state == transition->to){
-			elfp_os_copy_mapping(tsk,state->context, transition->low, transition->high);
+			elfp_os_copy_mapping(tsk,state->context, transition->low, transition->high,transition->type);
 			return 1;
 		}
 		else{
@@ -99,7 +99,7 @@ static int elfp_insert_data_transition(struct elfp_data_transition *data){
 		else {/* We do not need to sort on high, but TODO: make sure they don't overlap */
 		  if ( data->low< (*tree)->low ){
 		    if(data->high >= (*tree)->low){
-		      elfp_os_errormsg("Overlapping policy\n");
+			    elfp_os_errormsg("Overlapping policy. %p to %p and %p to %p \n",(*tree)->low,(*tree)->high,data->low, data->high);
 		      return -EINVAL;
 		    }
 		    tree = &((*tree)->left);
@@ -322,7 +322,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
 }
 int elfp_destroy_policy(struct elf_policy *policy)
 {
-	if(0 == elfp_policy_get_refcount(policy)){
+	if(0 != elfp_policy_get_refcount(policy)){
 		elfp_os_errormsg("elfp_free_policy: Tried to free elf policy that is still in use\n");
 		return -EINVAL;
 	}
