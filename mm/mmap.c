@@ -2699,7 +2699,7 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	  }
 	/* Well ordered locking, because 'to' is always a shadow mm  and
 	 * from a real address space	 */
-	down_write(&from->mmap_sem);
+	/* down_write(&from->mmap_sem);*/
 	if(mpnt->vm_start < start)
 	  split_vma(from,mpnt,start,1);
 	while(mpnt->vm_start < end){
@@ -2775,7 +2775,7 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	  /* if (tmp->vm_ops && tmp->vm_ops->open)
 	     tmp->vm_ops->open(tmp); */
 	}
- out: up_write(&from->mmap_sem);
+out: /*up_write(&from->mmap_sem);*/
 	return retval;
 }
 #endif
