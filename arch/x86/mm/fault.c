@@ -995,7 +995,26 @@ static int fault_in_kernel_space(unsigned long address)
 {
 	return address >= TASK_SIZE_MAX;
 }
-
+/* TODO: we should probably also check the write/nx bits on higher levels*/
+static int is_access_ok(struct mm_struct *mm,unsigned long address,unsigned int error_code){
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	int retval;
+	pgd = pgd_offset(mm,address);
+	if(pgd_none(*pgd) || !pgd_present(*pgd)) return 0;
+	pud = pud_offset(pgd,address);
+	if(pud_none(*pud) || !pud_present(*pud)) return 0;
+	pmd = pmd_offset(pud,address);
+	if(pmd_none(*pmd) || !pmd_present(*pmd)) return 0;
+	pte = pte_offset_map(pte,address);
+	if(pte_none(*pte)){ pte_unmap(pte); return 0;}
+	if(!pte_present(*pte)){ pte_unmap(pte); return 0;}
+	retval = !spurious_fault_check(error_code,pte);
+	pte_unmap(pte);
+	return retval;
+}
 /*
  * This routine handles page faults.  It determines the address,
  * and the problem, and then passes it off to one of the appropriate
@@ -1157,9 +1176,8 @@ retry:
 	 */
 good_area:
 #ifdef CONFIG_ELF_POLICY
-	if(likely(tsk->elf_policy_mm)){
-		/* If we have ELF policy, we might have to switch contexts at this point */
-		if (likely(tsk->elf_policy)) {
+	if(likely(tsk->elf_policy_mm) && likely(tsk->elf_policy)) {
+		if(1 || is_access_ok(tsk->mm,address,error_code)){ /* maybe we need to fix the fault in the original mapping first*/
 			if (error_code & PF_INSTR) {
 				if (elfp_handle_instruction_address_fault(address, tsk,regs)) 
 					goto out;

@@ -1029,8 +1029,10 @@ static inline int copy_pud_range(struct mm_struct *dst_mm, struct mm_struct *src
 	} while (dst_pud++, src_pud++, addr = next, addr != end);
 	return 0;
 }
-
-int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+/* ELFbac requires that sometimes we just copy ALL page tables. The regular
+ * copy_page_range has some optimisations when a PF handler would fill them
+ */
+int copy_page_range_force(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		struct vm_area_struct *vma)
 {
 	pgd_t *src_pgd, *dst_pgd;
@@ -1038,17 +1040,6 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	unsigned long addr = vma->vm_start;
 	unsigned long end = vma->vm_end;
 	int ret;
-
-	/*
-	 * Don't copy ptes where a page fault will fill them correctly.
-	 * Fork becomes much lighter when there are big shared or private
-	 * readonly mappings. The tradeoff is that copy_page_range is more
-	 * efficient than faulting.
-	 */
-	if (!(vma->vm_flags & (VM_HUGETLB|VM_NONLINEAR|VM_PFNMAP|VM_INSERTPAGE))) {
-		if (!vma->anon_vma)
-			return 0;
-	}
 
 	if (is_vm_hugetlb_page(vma))
 		return copy_hugetlb_page_range(dst_mm, src_mm, vma);
@@ -1091,7 +1082,22 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 						  vma->vm_start, end);
 	return ret;
 }
+int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		struct vm_area_struct *vma)
+{
 
+	/*
+	 * Don't copy ptes where a page fault will fill them correctly.
+	 * Fork becomes much lighter when there are big shared or private
+	 * readonly mappings. The tradeoff is that copy_page_range is more
+	 * efficient than faulting.
+	 */
+	if (!(vma->vm_flags & (VM_HUGETLB|VM_NONLINEAR|VM_PFNMAP|VM_INSERTPAGE))) {
+		if (!vma->anon_vma)
+			return 0;
+	}
+	copy_page_range_force(dst_mm,src_mm,vma);
+}
 static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				struct vm_area_struct *vma, pmd_t *pmd,
 				unsigned long addr, unsigned long end,

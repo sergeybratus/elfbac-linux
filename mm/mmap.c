@@ -2766,7 +2766,7 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	    }
 	  vma_link(to, tmp, prev,rb_link, rb_parent);
 	  to->map_count++;
-	  copy_page_range(to, from, mpnt);
+	  copy_page_range_force(to, from, mpnt);
 	  mpnt->vm_flags = vma_flags;
 	  //mpnt->vm_flags |= VM_SHARED;
 	  mpnt = mpnt->vm_next;
