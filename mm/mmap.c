@@ -2678,7 +2678,8 @@ void __init mmap_init(void)
 	ret = percpu_counter_init(&vm_committed_as, 0);
 	VM_BUG_ON(ret);
 }
-#ifdef CONFIG_ELF_POLICY
+extern int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+				struct vm_area_struct *vma);
 /* Used by ELF policy */
 int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start,uintptr_t end) {
   int retval =0;
@@ -2760,13 +2761,14 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 	  vma = find_vma_prepare(to,mpnt->vm_start,  &prev, &rb_link, &rb_parent);
 	  if(vma && vma->vm_end > mpnt->vm_start && vma->vm_start< mpnt->vm_end ) /* Another vma at the same addr? How did we pagefault? */
 	    {
-	      printk(KERN_ERR"elfbac: Overlapping policy statement\n");
+	      printk(KERN_ERR"elfbac: Tried to copy a memory region again - will copy page ranges in case attributes change\n");
+		  copy_page_range_force(to, from, mpnt);
 	      retval = -EINVAL;
 	      goto out;
 	    }
 	  vma_link(to, tmp, prev,rb_link, rb_parent);
 	  to->map_count++;
-	  copy_page_range_force(to, from, mpnt);
+	  copy_page_range_dumb(to, from, mpnt);
 	  mpnt->vm_flags = vma_flags;
 	  //mpnt->vm_flags |= VM_SHARED;
 	  mpnt = mpnt->vm_next;
@@ -2778,4 +2780,3 @@ int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_t start
 out: /*up_write(&from->mmap_sem);*/
 	return retval;
 }
-#endif

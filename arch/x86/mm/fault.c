@@ -1008,7 +1008,7 @@ static int is_access_ok(struct mm_struct *mm,unsigned long address,unsigned int 
 	if(pud_none(*pud) || !pud_present(*pud)) return 0;
 	pmd = pmd_offset(pud,address);
 	if(pmd_none(*pmd) || !pmd_present(*pmd)) return 0;
-	pte = pte_offset_map(pte,address);
+	pte = pte_offset_map(pmd,address);
 	if(pte_none(*pte)){ pte_unmap(pte); return 0;}
 	if(!pte_present(*pte)){ pte_unmap(pte); return 0;}
 	retval = !spurious_fault_check(error_code,pte);
@@ -1174,10 +1174,10 @@ retry:
 	 * Ok, we have a good vm_area for this memory access, so
 	 * we can handle it..
 	 */
-good_area:
+good_area:/* The faulting address is mapped in tsk->mm*/
 #ifdef CONFIG_ELF_POLICY
 	if(likely(tsk->elf_policy_mm) && likely(tsk->elf_policy)) {
-		if(1 || is_access_ok(tsk->mm,address,error_code)){ /* maybe we need to fix the fault in the original mapping first*/
+		if(is_access_ok(tsk->mm,address,error_code)){ /* maybe we need to fix the fault in the original mapping first*/
 			if (error_code & PF_INSTR) {
 				if (elfp_handle_instruction_address_fault(address, tsk,regs)) 
 					goto out;
