@@ -1011,7 +1011,7 @@ static int is_access_ok(struct mm_struct *mm,unsigned long address,unsigned int 
 	pte = pte_offset_map(pmd,address);
 	if(pte_none(*pte)){ pte_unmap(pte); return 0;}
 	if(!pte_present(*pte)){ pte_unmap(pte); return 0;}
-	retval = !spurious_fault_check(error_code,pte);
+	retval = spurious_fault_check(error_code,pte);
 	pte_unmap(pte);
 	return retval;
 }
