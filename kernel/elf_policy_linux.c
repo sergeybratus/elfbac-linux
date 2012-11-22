@@ -218,6 +218,7 @@ int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 			break;
 		}
 	} while (dst_pgd++, src_pgd++, addr = next, addr != end);
+	return ret;
 }
 void elfp_os_invalidate_clones(struct mm_struct *mm,
 			unsigned long start, unsigned long end){
@@ -294,21 +295,22 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end, unsigned short type){
 	/* down_write(&from->mmap_sem);*/
-	struct vma_area_struct *mpnt;
-	mpnt = find_vma(from,start);
+	int retval;
+	struct vm_area_struct *mpnt;
+	mpnt = find_vma(from->mm,start);
 	if(unlikely(!mpnt) || mpnt->vm_start > end) /* Start not mapped */
 	{
 		retval=-EINVAL;
 		goto out;
 	}
 	if(mpnt->vm_start < start)
-		split_vma(from,mpnt,start,1);
+		split_vma(from->mm,mpnt,start,1);
 	if(mpnt->vm_end > end)
-		split_vma(from,mpnt,end,0);
-	BUG_ON(mpnt->vm_start != start || mpnt->vm_end != end);
-	copy_page_range_dumb(from,to,mpnt);
+		split_vma(from->mm,mpnt,end,0);
+	BUG_ON(mpnt->vm_start < start || mpnt->vm_end  > end);
+	copy_page_range_dumb(to,from->mm,mpnt);
 	//up_write(&from->mm->mmap_sem);
-	return retval;
+out:	return retval;
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
 	int have_mmu_notifier = 1;
@@ -326,6 +328,10 @@ void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct 
 //	if(!have_mmu_notifier)
 //		mmu_notifier_register(&elfp_mmu_notifier,tsk->mm);
 	atomic_inc(&(policy->refs));
+}
+void elfp_os_free_context(elfp_context_t *context){
+	printk("Warning, I am leaking memory from elf_policy_linux.c");
+	//mmput(context);
 }
 void elfp_task_release_policy(struct elf_policy *policy){
        if(atomic_dec_and_test(&(policy->refs))){
@@ -361,8 +367,8 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 	case 0:
 		if(id!=0) return -EINVAL;
 		{
-		  long retval;
-				/*TODO: DOS much.. Refactor to use the normal read/write primitives */
+			long retval;
+			/*TODO: DOS much.. Refactor to use the normal read/write primitives */
 			void *elfp_buf = kmalloc(argsize,GFP_KERNEL);
 			if(!elfp_buf){
 				send_sig(SIGKILL, current, 0);
@@ -377,12 +383,12 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 			retval = elfp_parse_policy((uintptr_t)arg, (uintptr_t)argsize,current,NULL); //TODO: We need to set up a special "uninitialised" state, which traps the first memory access
 			kfree(elfp_buf);
 			if(retval < 0){
-			  printk(KERN_ERR "Error parsing elfbac policy. Killing process");
+				printk(KERN_ERR "Error parsing elfbac policy. Killing process");
 				send_sig(SIGKILL,current,0);
 				goto out;
 			}
 		}
-		out: return 0;
+	out: return 0;
 		break;
 	case 500: /* DIRTY HACKS */
 		pcid_init();

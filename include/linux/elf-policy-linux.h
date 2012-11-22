@@ -15,7 +15,7 @@
 #include <linux/atomic.h>
 extern void __init elfp_init(void);
 
-typedef mm_struct elfp_context_t;
+typedef struct mm_struct elfp_context_t;
 typedef struct task_struct elfp_process_t;
 typedef atomic_t elfp_atomic_ctr_t;
 typedef struct pt_regs* elfp_intr_state_t;
