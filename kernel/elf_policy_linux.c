@@ -65,6 +65,160 @@ static void elfp_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 		}
 	}
 }
+
+int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
+		unsigned long addr, unsigned long end) {
+	pte_t *orig_src_pte, *orig_dst_pte;
+	pte_t *src_pte, *dst_pte;
+	spinlock_t *src_ptl, *dst_ptl;
+	int progress = 0;
+	swp_entry_t entry = (swp_entry_t) {0};
+
+			again:
+
+			dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+			if (!dst_pte)
+			return -ENOMEM;
+			src_pte = pte_offset_map(src_pmd, addr);
+			src_ptl = pte_lockptr(src_mm, src_pmd);
+			spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+			orig_src_pte = src_pte;
+			orig_dst_pte = dst_pte;
+			arch_enter_lazy_mmu_mode();
+
+			do {
+				set_pte_at(dst_mm, addr, dst_pte, *src_pte);
+			}while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
+
+			arch_leave_lazy_mmu_mode();
+			spin_unlock(src_ptl);
+			pte_unmap(orig_src_pte);
+			pte_unmap_unlock(orig_dst_pte, dst_ptl);
+			cond_resched();
+			if (addr != end)
+			goto again;
+			return 0;
+		}
+
+static inline int copy_pmd_range(struct mm_struct *dst_mm,
+		struct mm_struct *src_mm, pud_t *dst_pud, pud_t *src_pud,
+		struct vm_area_struct *vma, unsigned long addr, unsigned long end) {
+	pmd_t *src_pmd, *dst_pmd;
+	unsigned long next;
+
+	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
+	if (!dst_pmd)
+		return -ENOMEM;
+	src_pmd = pmd_offset(src_pud, addr);
+	do {
+		next = pmd_addr_end(addr, end);
+		if (pmd_trans_huge(*src_pmd)) {
+			int err;
+			VM_BUG_ON(next-addr != HPAGE_PMD_SIZE);
+			err = copy_huge_pmd(dst_mm, src_mm, dst_pmd, src_pmd, addr, vma);
+			if (err == -ENOMEM)
+				return -ENOMEM;
+			if (!err)
+				continue;
+			/* fall through */
+		}
+		if (pmd_none_or_clear_bad(src_pmd))
+			continue;
+		if (copy_pte_range_dumb(dst_mm, src_mm, dst_pmd, src_pmd, vma, addr,
+				next))
+			return -ENOMEM;
+	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
+	return 0;
+}
+
+static inline int copy_pud_range(struct mm_struct *dst_mm,
+		struct mm_struct *src_mm, pgd_t *dst_pgd, pgd_t *src_pgd,
+		struct vm_area_struct *vma, unsigned long addr, unsigned long end) {
+	pud_t *src_pud, *dst_pud;
+	unsigned long next;
+
+	dst_pud = pud_alloc(dst_mm, dst_pgd, addr);
+	if (!dst_pud)
+		return -ENOMEM;
+	src_pud = pud_offset(src_pgd, addr);
+	do {
+		next = pud_addr_end(addr, end);
+		if (pud_none_or_clear_bad(src_pud))
+			continue;
+		if (copy_pmd_range(dst_mm, src_mm, dst_pud, src_pud, vma, addr, next))
+			return -ENOMEM;
+	} while (dst_pud++, src_pud++, addr = next, addr != end);
+	return 0;
+}
+int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		struct vm_area_struct *vma) {
+	/*Hugetlb.c*/
+	pgd_t *src_pgd, *dst_pgd;
+	unsigned long next;
+	unsigned long addr = vma->vm_start;
+	unsigned long end = vma->vm_end;
+	int ret;
+
+	if (is_vm_hugetlb_page(vma)) { /* How does this work with multiple levels ?*/
+		pte_t *src_pte, *dst_pte, entry;
+		struct page *ptepage;
+
+		struct hstate *h = hstate_vma(vma);
+		unsigned long sz = huge_page_size(h);
+
+		for (addr = vma->vm_start; addr < vma->vm_end; addr += sz) {
+			src_pte = huge_pte_offset(src_mm, addr);
+			if (!src_pte)
+				continue;
+			dst_pte = huge_pte_alloc(dst_mm, addr, sz);
+			if (!dst_pte)
+				goto nomem;
+
+			/* If the pagetables are shared don't copy or take references */
+			if (dst_pte == src_pte)
+				continue;
+
+			spin_lock(&dst_mm->page_table_lock);
+			spin_lock_nested(&src_mm->page_table_lock, SINGLE_DEPTH_NESTING);
+			if (!huge_pte_none(huge_ptep_get(src_pte))) {
+				entry = huge_ptep_get(src_pte);
+				ptepage = pte_page(entry);
+				get_page(ptepage);
+				page_dup_rmap(ptepage);
+				set_huge_pte_at(dst_mm, addr, dst_pte, entry);
+			}
+			spin_unlock(&src_mm->page_table_lock);
+			spin_unlock(&dst_mm->page_table_lock);
+		}
+		return 0;
+
+		nomem: return -ENOMEM;
+	}
+
+	if (unlikely(is_pfn_mapping(vma))) {
+		BUG_ON("unsupported");
+		/*
+		 * We do not free on error cases below as remove_vma
+		 * gets called on error from higher level routine
+		 */
+		ret = track_pfn_vma_copy(vma);
+		if (ret)
+			return ret;
+	}
+	dst_pgd = pgd_offset(dst_mm, addr);
+	src_pgd = pgd_offset(src_mm, addr);
+	do {
+		next = pgd_addr_end(addr, end);
+		if (pgd_none_or_clear_bad(src_pgd))
+			continue;
+		if (unlikely(copy_pud_range(dst_mm, src_mm, dst_pgd, src_pgd,
+						vma, addr, next))) {
+			ret = -ENOMEM;
+			break;
+		}
+	} while (dst_pgd++, src_pgd++, addr = next, addr != end);
+}
 void elfp_os_invalidate_clones(struct mm_struct *mm,
 			unsigned long start, unsigned long end){
 	/*BUG_ON(start>=end);
@@ -139,72 +293,22 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 	return 0;
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end, unsigned short type){
-	int retval;	
-	int error = 0;
-	unsigned long vm_flags, nstart, tmp, reqprot;
-	struct vm_area_struct *vma, *prev;
-	//up_write(&from->mm->mmap_sem);
-	retval = vma_dup_at_addr(from->mm,to,start,end);
-	//return retval;
-	unsigned long prot = 0 ;
-	if(type & ELFP_RW_READ)
-		prot |= PROT_READ;
-	if(type & ELFP_RW_WRITE)
-		prot |= PROT_WRITE;
-	if(type & ELFP_RW_EXEC)
-		prot |= PROT_EXEC;
-	reqprot = prot;
-	vm_flags = calc_vm_prot_bits(prot);	vma = find_vma(current->mm, start);
-	error = -ENOMEM;
-	vma = find_vma(to, start);
-	if (!vma)
+	/* down_write(&from->mmap_sem);*/
+	struct vma_area_struct *mpnt;
+	mpnt = find_vma(from,start);
+	if(unlikely(!mpnt) || mpnt->vm_start > end) /* Start not mapped */
+	{
+		retval=-EINVAL;
 		goto out;
-	prev = vma->vm_prev;
-	
-	if (vma->vm_start > start)
-		goto out;
-	if (start > vma->vm_start)
-		prev = vma;
-
-	for (nstart = start ; ; ) {
-		unsigned long newflags;
-
-		/* Here we know that  vma->vm_start <= nstart < vma->vm_end. */
-
-		newflags = vm_flags | (vma->vm_flags & ~(VM_READ | VM_WRITE | VM_EXEC));
-
-		/* newflags >> 4 shift VM_MAY% in place of VM_% */
-		if ((newflags & ~(newflags >> 4)) & (VM_READ | VM_WRITE | VM_EXEC)) {
-			error = -EACCES;
-			goto out;
-		}
-
-		error = security_file_mprotect(vma, reqprot, prot);
-		if (error)
-			goto out;
-
-		tmp = vma->vm_end;
-		if (tmp > end)
-			tmp = end;
-		error = mprotect_fixup(vma, &prev, nstart, tmp, newflags);
-		if (error)
-			goto out;
-		nstart = tmp;
-
-		if (nstart < prev->vm_end)
-			nstart = prev->vm_end;
-		if (nstart >= end)
-			goto out;
-
-		vma = prev->vm_next;
-		if (!vma || vma->vm_start != nstart) {
-			error = -ENOMEM;
-			goto out;
-		}
 	}
-out:
+	if(mpnt->vm_start < start)
+		split_vma(from,mpnt,start,1);
+	if(mpnt->vm_end > end)
+		split_vma(from,mpnt,end,0);
+	BUG_ON(mpnt->vm_start != start || mpnt->vm_end != end);
+	copy_page_range_dumb(from,to,mpnt);
+	//up_write(&from->mm->mmap_sem);
 	return retval;
-  //down_write(&from->mm->mmap_sem);
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
 	int have_mmu_notifier = 1;
@@ -249,166 +353,6 @@ uintptr_t elfp_os_ret_offset(elfp_intr_state_t regs,uintptr_t ip){
   return regs->ax; /* X86-64 stores return address in RAX*/
 }
 
-
-int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-		   pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
-		   unsigned long addr, unsigned long end)
-{
-	pte_t *orig_src_pte, *orig_dst_pte;
-	pte_t *src_pte, *dst_pte;
-	spinlock_t *src_ptl, *dst_ptl;
-	int progress = 0;
-	swp_entry_t entry = (swp_entry_t){0};
-
-again:
-
-	dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
-	if (!dst_pte)
-		return -ENOMEM;
-	src_pte = pte_offset_map(src_pmd, addr);
-	src_ptl = pte_lockptr(src_mm, src_pmd);
-	spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
-	orig_src_pte = src_pte;
-	orig_dst_pte = dst_pte;
-	arch_enter_lazy_mmu_mode();
-
-	do {
-	  set_pte_at(dst_mm, addr, dst_pte, *src_pte);
-	} while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
-
-	arch_leave_lazy_mmu_mode();
-	spin_unlock(src_ptl);
-	pte_unmap(orig_src_pte);
-	pte_unmap_unlock(orig_dst_pte, dst_ptl);
-	cond_resched();
-	if (addr != end)
-		goto again;
-	return 0;
-}
-
-static inline int copy_pmd_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-		pud_t *dst_pud, pud_t *src_pud, struct vm_area_struct *vma,
-		unsigned long addr, unsigned long end)
-{
-	pmd_t *src_pmd, *dst_pmd;
-	unsigned long next;
-
-	dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
-	if (!dst_pmd)
-		return -ENOMEM;
-	src_pmd = pmd_offset(src_pud, addr);
-	do {
-		next = pmd_addr_end(addr, end);
-		if (pmd_trans_huge(*src_pmd)) {
-			int err;
-			VM_BUG_ON(next-addr != HPAGE_PMD_SIZE);
-			err = copy_huge_pmd(dst_mm, src_mm,
-					    dst_pmd, src_pmd, addr, vma);
-			if (err == -ENOMEM)
-				return -ENOMEM;
-			if (!err)
-				continue;
-			/* fall through */
-		}
-		if (pmd_none_or_clear_bad(src_pmd))
-			continue;
-		if (copy_pte_range_dumb(dst_mm, src_mm, dst_pmd, src_pmd,
-						vma, addr, next))
-			return -ENOMEM;
-	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
-	return 0;
-}
-
-static inline int copy_pud_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-		pgd_t *dst_pgd, pgd_t *src_pgd, struct vm_area_struct *vma,
-		unsigned long addr, unsigned long end)
-{
-	pud_t *src_pud, *dst_pud;
-	unsigned long next;
-
-	dst_pud = pud_alloc(dst_mm, dst_pgd, addr);
-	if (!dst_pud)
-		return -ENOMEM;
-	src_pud = pud_offset(src_pgd, addr);
-	do {
-		next = pud_addr_end(addr, end);
-		if (pud_none_or_clear_bad(src_pud))
-			continue;
-		if (copy_pmd_range(dst_mm, src_mm, dst_pud, src_pud,
-						vma, addr, next))
-			return -ENOMEM;
-	} while (dst_pud++, src_pud++, addr = next, addr != end);
-	return 0;
-}
-int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-		struct vm_area_struct *vma)
-{	
-  /*Hugetlb.c*/
-	pgd_t *src_pgd, *dst_pgd;
-	unsigned long next;
-	unsigned long addr = vma->vm_start;
-	unsigned long end = vma->vm_end;
-	int ret;
-
-  if (is_vm_hugetlb_page(vma)){
-    pte_t *src_pte, *dst_pte, entry;
-    struct page *ptepage;
-     
-    struct hstate *h = hstate_vma(vma);
-    unsigned long sz = huge_page_size(h);
-
-    for (addr = vma->vm_start; addr < vma->vm_end; addr += sz) {
-      src_pte = huge_pte_offset(src_mm, addr);
-      if (!src_pte)
-	continue;
-      dst_pte = huge_pte_alloc(dst_mm, addr, sz);
-      if (!dst_pte)
-	goto nomem;
-
-      /* If the pagetables are shared don't copy or take references */
-      if (dst_pte == src_pte)
-	continue;
-
-      spin_lock(&dst_mm->page_table_lock);
-      spin_lock_nested(&src_mm->page_table_lock, SINGLE_DEPTH_NESTING);
-      if (!huge_pte_none(huge_ptep_get(src_pte))) {
-	entry = huge_ptep_get(src_pte);
-	ptepage = pte_page(entry);
-	get_page(ptepage);
-	page_dup_rmap(ptepage);
-	set_huge_pte_at(dst_mm, addr, dst_pte, entry);
-      }
-      spin_unlock(&src_mm->page_table_lock);
-      spin_unlock(&dst_mm->page_table_lock);
-    }
-    return 0;
-
-  nomem:
-    return -ENOMEM;
-  }
-
-  if (unlikely(is_pfn_mapping(vma))) {
-    /*
-     * We do not free on error cases below as remove_vma
-     * gets called on error from higher level routine
-     */
-    ret = track_pfn_vma_copy(vma);
-    if (ret)
-      return ret;
-  }
-  dst_pgd = pgd_offset(dst_mm, addr);
-  src_pgd = pgd_offset(src_mm, addr);
-  do {
-    next = pgd_addr_end(addr, end);
-    if (pgd_none_or_clear_bad(src_pgd))
-      continue;
-    if (unlikely(copy_pud_range(dst_mm, src_mm, dst_pgd, src_pgd,
-				vma, addr, next))) {
-      ret = -ENOMEM;
-      break;
-    }
-  } while (dst_pgd++, src_pgd++, addr = next, addr != end);
-}
 
 extern void pcid_init();
 asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,

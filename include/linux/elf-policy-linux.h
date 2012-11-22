@@ -15,7 +15,7 @@
 #include <linux/atomic.h>
 extern void __init elfp_init(void);
 
-typedef struct mm_struct elfp_context_t;
+typedef pgd_t elfp_context_t;
 typedef struct task_struct elfp_process_t;
 typedef atomic_t elfp_atomic_ctr_t;
 typedef struct pt_regs* elfp_intr_state_t;
@@ -51,9 +51,7 @@ static inline size_t elfp_read_policy(uintptr_t off, void *outbuf,size_t size,el
 	memcpy (outbuf,(void *)off,size);
 	return size; /* memcpy doesn't fail */
 }
-static inline void elfp_os_free_context(elfp_context_t *context){
-	mmput(context);
-}
+void elfp_os_free_context(elfp_context_t *context);
 static inline void elfp_os_atomic_init(elfp_atomic_ctr_t *p,int val){
 	atomic_set(p,val);
 }
