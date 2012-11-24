@@ -1178,6 +1178,9 @@ good_area:/* The faulting address is mapped in tsk->mm*/
 #ifdef CONFIG_ELF_POLICY
 	if(likely(tsk->elf_policy_mm) && likely(tsk->elf_policy)) {
 		if(is_access_ok(tsk->mm,address,error_code)){ /* maybe we need to fix the fault in the original mapping first*/
+			unsigned long addr_base = address & PAGE_MASK;
+			elfp_os_copy_mapping(tsk, tsk->elf_policy_mm, addr_base, addr_base + PAGE_SIZE,0);
+#if 0
 			if (error_code & PF_INSTR) {
 				if (elfp_handle_instruction_address_fault(address, tsk,regs)) 
 					goto out;
@@ -1194,6 +1197,7 @@ good_area:/* The faulting address is mapped in tsk->mm*/
 					goto bad_area;
 				}
 			}
+#endif
 		}
 	}
 #endif

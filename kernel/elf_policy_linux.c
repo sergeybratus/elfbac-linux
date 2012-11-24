@@ -152,13 +152,14 @@ static inline int copy_pud_range(struct mm_struct *dst_mm,
 	return 0;
 }
 int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-		struct vm_area_struct *vma) {
+			struct vm_area_struct *vma, unsigned long addr, unsigned long end) {
 	/*Hugetlb.c*/
 	pgd_t *src_pgd, *dst_pgd;
-	unsigned long next;
-	unsigned long addr = vma->vm_start;
-	unsigned long end = vma->vm_end;
+	unsigned long next;	
 	int ret;
+	/*FIXME: validate that vma holds addr */
+	BUG_ON(addr & ~PAGE_MASK);
+	BUG_ON(end &~PAGE_MASK);
 
 	if (is_vm_hugetlb_page(vma)) { /* How does this work with multiple levels ?*/
 		pte_t *src_pte, *dst_pte, entry;
@@ -294,6 +295,7 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 	return 0;
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end, unsigned short type){
+	/* FIXME: Implement support for type *
 	/* down_write(&from->mmap_sem);*/
 	int retval;
 	struct vm_area_struct *mpnt;
@@ -308,7 +310,7 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
 	if(mpnt->vm_end > end)
 		split_vma(from->mm,mpnt,end,0);
 	BUG_ON(mpnt->vm_start < start || mpnt->vm_end  > end);
-	copy_page_range_dumb(to,from->mm,mpnt);
+	copy_page_range_dumb(to,from->mm,mpnt,start,end);
 	//up_write(&from->mm->mmap_sem);
 out:	return retval;
 }
