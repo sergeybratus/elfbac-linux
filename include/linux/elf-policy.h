@@ -89,20 +89,26 @@ struct elfp_state;
 struct elfp_stack;
 struct elfp_call_transition;
 struct elfp_data_transition;
+/* These structures describe an ELFbac policy in kernel memory. They
+   are created at runtime from the elfp_desc structures found in the
+   .elfbac section. This header file is intended to be used in all
+   ELFbac ports, so per-kernel aliases from elfbac-linux.h are used.*/
+
 struct elf_policy{
   struct elfp_state *states;
   struct elfp_stack *stacks;
   elfp_atomic_ctr_t refs; /*should be made atomic_t */
-
 };
 struct elfp_state {
-  elfp_context_t *context;
-  struct elfp_call_transition *calls;
-  struct elfp_data_transition *data;
-  struct elfp_state *prev,*next;
-  struct elf_policy *policy; /* Also has the lock */
-  struct elfp_stack *stack;
-  elfp_id_t id;
+  elfp_context_t *context; /* This memory context maps a subset of the
+                              processes tables and is filled on demand */
+  elfp_tree_root calls; /*Maps to OS tree implementation*/
+  elfp_tree_root data;
+  struct elfp_state *prev,*next; /* Linked list of states */
+  struct elf_policy *policy; /* Policy this state belongs to */
+  struct elfp_stack *stack; /* Last call transition taken */
+  elfp_id_t id; /* id of this state in the policy. Used for parsing
+                   policy statements */
 };
 struct elfp_stack {
   struct elfp_stack *prev,*next;
@@ -111,18 +117,18 @@ struct elfp_stack {
   elfp_os_stack os;
 };
 struct elfp_call_transition{
-	struct elfp_call_transition *left,*right; /* Sorted by 'from', the 'to' */
-	struct elfp_state *from,*to;
-	uintptr_t offset;
-	short parambytes;
-	short returnbytes; /* <0: Do not return . Otherwise, number of return bytes */
-	struct elfp_call_transition *next;
+  elfp_tree_node tree; /* Wraps OS rb-tree implementation*/
+  struct elfp_state *from,*to; 
+  uintptr_t offset; /* Called address */
+  short parambytes; /* bytes copied from caller to callee*/
+  short returnbytes; /* bytes copied from callee to caller. <0 to
+                              disallow implicit return */
 };
 struct elfp_data_transition {
-	struct elfp_data_transition *left,*right; /* Sorted by  */
-	struct elfp_state *from,*to;
-	uintptr_t low, high;
-	unsigned short type; /* READ / WRITE flags */
+  elfp_tree_node tree;
+  struct elfp_state *from,*to;
+  uintptr_t low, high;
+  unsigned short type; /* READ / WRITE flags */
 };
 /* How to handle returns? */
 struct elfp_stack_frame{ 

@@ -19,6 +19,8 @@ typedef struct mm_struct elfp_context_t;
 typedef struct task_struct elfp_process_t;
 typedef atomic_t elfp_atomic_ctr_t;
 typedef struct pt_regs* elfp_intr_state_t;
+typedef struct rb_node elfp_tree_node;
+typedef struct rb_root elfp_tree_root;
 #ifdef CONFIG_X86_64
 typedef unsigned long elfp_os_stack; //Stack pointer
 #endif

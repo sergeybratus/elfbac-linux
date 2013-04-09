@@ -376,7 +376,7 @@ static unsigned long total_mapping_size(struct elf_phdr *cmds, int nr)
    so we keep this separate.  Technically the library read function
    is only provided so that we can read a.out libraries that have
    an ELF header */
-
+/*FIXME: This needs to load the interpreter ELFbac policy*/
 static unsigned long load_elf_interp(struct elfhdr *interp_elf_ex,
 		struct file *interpreter, unsigned long *interp_map_addr,
 		unsigned long no_base)
@@ -981,8 +981,8 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	 */
 	ELF_PLAT_INIT(regs, reloc_func_desc);
 #endif
-
-#ifdef CONFIG_ELF_POLICY
+#if 0
+        //#ifdef CONFIG_ELF_POLICY
 	elf_ppnt = elf_phdata;
 	for (i = 0; i < loc->elf_ex.e_phnum; i++, elf_ppnt++)
 	if (elf_ppnt->p_type == PT_ELFBAC_POLICY) {

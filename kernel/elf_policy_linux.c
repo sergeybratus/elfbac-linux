@@ -332,7 +332,7 @@ void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct 
 	atomic_inc(&(policy->refs));
 }
 void elfp_os_free_context(elfp_context_t *context){
-	printk("Warning, I am leaking memory from elf_policy_linux.c");
+	printk("Warning, I am leaking memory from elf_policy_linux.c\n");
 	//mmput(context);
 }
 void elfp_task_release_policy(struct elf_policy *policy){
@@ -367,7 +367,9 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 		const void *arg, const size_t argsize) {
 	switch (function) {
 	case 0:
-		if(id!=0) return -EINVAL;
+		if(id!=0) return -EINVAL; 
+                if(argsize == 0) return 0; /*FIXME: For development only,
+                                          libc takes a long while to recompile */
 		{
 			long retval;
 			/*TODO: DOS much.. Refactor to use the normal read/write primitives */
@@ -385,7 +387,7 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 			retval = elfp_parse_policy((uintptr_t)arg, (uintptr_t)argsize,current,NULL); //TODO: We need to set up a special "uninitialised" state, which traps the first memory access
 			kfree(elfp_buf);
 			if(retval < 0){
-				printk(KERN_ERR "Error parsing elfbac policy. Killing process");
+                          printk(KERN_ERR "Error parsing elfbac policy. Killing process\n");
 				send_sig(SIGKILL,current,0);
 				goto out;
 			}
