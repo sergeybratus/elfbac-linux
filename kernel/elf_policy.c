@@ -26,18 +26,21 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
           return retval;
         /* Maybe it's a return?*/
         if(ELFP_TASK_STACKPTR(tsk) && ELFP_TASK_STACKPTR(tsk)->ret_offset == address)     { 
+#if 0
           struct elfp_stack_frame *stack = ELFP_TASK_STACKPTR(tsk);
           //elfp_os_copy_stack_bytes(stack->stack,stack->to->stack,stack->returnbytes);
           ELFP_TASK_STACKPTR(tsk) = stack->down;
           elfp_free_stack_frame(stack);
           elfp_os_change_context(tsk,stack->trans->from,regs);
           return 1;
+#endif
         }
         struct elfp_call_transition * transition = elfp_os_find_call_transition(state,address);
         if(!transition)
           return NULL;
         if(transition->returnbytes >=0) /*If returning will be allowed*/
           {
+#if 0
             struct elfp_stack_frame *stack= elfp_alloc_stack_frame(); /*TODO check for oom conditions */
             /*TODO: Copy stack bytes */
             stack->down = ELFP_TASK_STACKPTR(tsk);
@@ -45,6 +48,7 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
             stack->ret_offset = elfp_os_ret_offset(regs,address);
             stack->returnbytes = transition->returnbytes;
             ELFP_TASK_STACKPTR(tsk)= stack;
+#endif 
           }
         elfp_os_change_context(tsk,transition->to,regs);/* TODO: Copy stack, handle return */
         return 1;
