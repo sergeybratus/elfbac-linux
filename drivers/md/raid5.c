@@ -196,12 +196,14 @@ static void __release_stripe(struct r5conf *conf, struct stripe_head *sh)
 		BUG_ON(!list_empty(&sh->lru));
 		BUG_ON(atomic_read(&conf->active_stripes)==0);
 		if (test_bit(STRIPE_HANDLE, &sh->state)) {
-			if (test_bit(STRIPE_DELAYED, &sh->state))
+			if (test_bit(STRIPE_DELAYED, &sh->state) &&
+			    !test_bit(STRIPE_PREREAD_ACTIVE, &sh->state))
 				list_add_tail(&sh->lru, &conf->delayed_list);
 			else if (test_bit(STRIPE_BIT_DELAY, &sh->state) &&
 				   sh->bm_seq - conf->seq_write > 0)
 				list_add_tail(&sh->lru, &conf->bitmap_list);
 			else {
+				clear_bit(STRIPE_DELAYED, &sh->state);
 				clear_bit(STRIPE_BIT_DELAY, &sh->state);
 				list_add_tail(&sh->lru, &conf->handle_list);
 			}
@@ -378,6 +380,8 @@ static int calc_degraded(struct r5conf *conf)
 	degraded = 0;
 	for (i = 0; i < conf->previous_raid_disks; i++) {
 		struct md_rdev *rdev = rcu_dereference(conf->disks[i].rdev);
+		if (rdev && test_bit(Faulty, &rdev->flags))
+			rdev = rcu_dereference(conf->disks[i].replacement);
 		if (!rdev || test_bit(Faulty, &rdev->flags))
 			degraded++;
 		else if (test_bit(In_sync, &rdev->flags))
@@ -402,6 +406,8 @@ static int calc_degraded(struct r5conf *conf)
 	degraded2 = 0;
 	for (i = 0; i < conf->raid_disks; i++) {
 		struct md_rdev *rdev = rcu_dereference(conf->disks[i].rdev);
+		if (rdev && test_bit(Faulty, &rdev->flags))
+			rdev = rcu_dereference(conf->disks[i].replacement);
 		if (!rdev || test_bit(Faulty, &rdev->flags))
 			degraded2++;
 		else if (test_bit(In_sync, &rdev->flags))
@@ -583,6 +589,12 @@ static void ops_run_io(struct stripe_head *sh, struct stripe_head_state *s)
 					 * a chance*/
 					md_check_recovery(conf->mddev);
 				}
+				/*
+				 * Because md_wait_for_blocked_rdev
+				 * will dec nr_pending, we must
+				 * increment it first.
+				 */
+				atomic_inc(&rdev->nr_pending);
 				md_wait_for_blocked_rdev(rdev, conf->mddev);
 			} else {
 				/* Acknowledged bad block - skip the write */
@@ -2471,39 +2483,41 @@ handle_failed_sync(struct r5conf *conf, struct stripe_head *sh,
 	int abort = 0;
 	int i;
 
-	md_done_sync(conf->mddev, STRIPE_SECTORS, 0);
 	clear_bit(STRIPE_SYNCING, &sh->state);
 	s->syncing = 0;
 	s->replacing = 0;
 	/* There is nothing more to do for sync/check/repair.
+	 * Don't even need to abort as that is handled elsewhere
+	 * if needed, and not always wanted e.g. if there is a known
+	 * bad block here.
 	 * For recover/replace we need to record a bad block on all
 	 * non-sync devices, or abort the recovery
 	 */
-	if (!test_bit(MD_RECOVERY_RECOVER, &conf->mddev->recovery))
-		return;
-	/* During recovery devices cannot be removed, so locking and
-	 * refcounting of rdevs is not needed
-	 */
-	for (i = 0; i < conf->raid_disks; i++) {
-		struct md_rdev *rdev = conf->disks[i].rdev;
-		if (rdev
-		    && !test_bit(Faulty, &rdev->flags)
-		    && !test_bit(In_sync, &rdev->flags)
-		    && !rdev_set_badblocks(rdev, sh->sector,
-					   STRIPE_SECTORS, 0))
-			abort = 1;
-		rdev = conf->disks[i].replacement;
-		if (rdev
-		    && !test_bit(Faulty, &rdev->flags)
-		    && !test_bit(In_sync, &rdev->flags)
-		    && !rdev_set_badblocks(rdev, sh->sector,
-					   STRIPE_SECTORS, 0))
-			abort = 1;
+	if (test_bit(MD_RECOVERY_RECOVER, &conf->mddev->recovery)) {
+		/* During recovery devices cannot be removed, so
+		 * locking and refcounting of rdevs is not needed
+		 */
+		for (i = 0; i < conf->raid_disks; i++) {
+			struct md_rdev *rdev = conf->disks[i].rdev;
+			if (rdev
+			    && !test_bit(Faulty, &rdev->flags)
+			    && !test_bit(In_sync, &rdev->flags)
+			    && !rdev_set_badblocks(rdev, sh->sector,
+						   STRIPE_SECTORS, 0))
+				abort = 1;
+			rdev = conf->disks[i].replacement;
+			if (rdev
+			    && !test_bit(Faulty, &rdev->flags)
+			    && !test_bit(In_sync, &rdev->flags)
+			    && !rdev_set_badblocks(rdev, sh->sector,
+						   STRIPE_SECTORS, 0))
+				abort = 1;
+		}
+		if (abort)
+			conf->recovery_disabled =
+				conf->mddev->recovery_disabled;
 	}
-	if (abort) {
-		conf->recovery_disabled = conf->mddev->recovery_disabled;
-		set_bit(MD_RECOVERY_INTR, &conf->mddev->recovery);
-	}
+	md_done_sync(conf->mddev, STRIPE_SECTORS, !abort);
 }
 
 static int want_replace(struct stripe_head *sh, int disk_idx)
@@ -3203,7 +3217,8 @@ static void analyse_stripe(struct stripe_head *sh, struct stripe_head_state *s)
 			/* Not in-sync */;
 		else if (is_bad) {
 			/* also not in-sync */
-			if (!test_bit(WriteErrorSeen, &rdev->flags)) {
+			if (!test_bit(WriteErrorSeen, &rdev->flags) &&
+			    test_bit(R5_UPTODATE, &dev->flags)) {
 				/* treat as in-sync, but with a read error
 				 * which we can now try to correct
 				 */
@@ -3276,12 +3291,14 @@ static void analyse_stripe(struct stripe_head *sh, struct stripe_head_state *s)
 		/* If there is a failed device being replaced,
 		 *     we must be recovering.
 		 * else if we are after recovery_cp, we must be syncing
+		 * else if MD_RECOVERY_REQUESTED is set, we also are syncing.
 		 * else we can only be replacing
 		 * sync and recovery both need to read all devices, and so
 		 * use the same flag.
 		 */
 		if (do_recovery ||
-		    sh->sector >= conf->mddev->recovery_cp)
+		    sh->sector >= conf->mddev->recovery_cp ||
+		    test_bit(MD_RECOVERY_REQUESTED, &(conf->mddev->recovery)))
 			s->syncing = 1;
 		else
 			s->replacing = 1;
@@ -3837,7 +3854,6 @@ static int chunk_aligned_read(struct mddev *mddev, struct bio * raid_bio)
 		raid_bio->bi_next = (void*)rdev;
 		align_bi->bi_bdev =  rdev->bdev;
 		align_bi->bi_flags &= ~(1 << BIO_SEG_VALID);
-		align_bi->bi_sector += rdev->data_offset;
 
 		if (!bio_fits_rdev(align_bi) ||
 		    is_badblock(rdev, align_bi->bi_sector, align_bi->bi_size>>9,
@@ -3847,6 +3863,9 @@ static int chunk_aligned_read(struct mddev *mddev, struct bio * raid_bio)
 			rdev_dec_pending(rdev, mddev);
 			return 0;
 		}
+
+		/* No reshape active, so we can trust rdev->data_offset */
+		align_bi->bi_sector += rdev->data_offset;
 
 		spin_lock_irq(&conf->device_lock);
 		wait_event_lock_irq(conf->wait_for_stripe,

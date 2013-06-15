@@ -1653,7 +1653,11 @@ static noinline int copy_to_sk(struct btrfs_root *root,
 		item_off = btrfs_item_ptr_offset(leaf, i);
 		item_len = btrfs_item_size_nr(leaf, i);
 
-		if (item_len > BTRFS_SEARCH_ARGS_BUFSIZE)
+		btrfs_item_key_to_cpu(leaf, key, i);
+		if (!key_in_sk(key, sk))
+			continue;
+
+		if (sizeof(sh) + item_len > BTRFS_SEARCH_ARGS_BUFSIZE)
 			item_len = 0;
 
 		if (sizeof(sh) + item_len + *sk_offset >
@@ -1661,10 +1665,6 @@ static noinline int copy_to_sk(struct btrfs_root *root,
 			ret = 1;
 			goto overflow;
 		}
-
-		btrfs_item_key_to_cpu(leaf, key, i);
-		if (!key_in_sk(key, sk))
-			continue;
 
 		sh.objectid = key->objectid;
 		sh.offset = key->offset;
@@ -2262,7 +2262,10 @@ static long btrfs_ioctl_dev_info(struct btrfs_root *root, void __user *arg)
 	di_args->bytes_used = dev->bytes_used;
 	di_args->total_bytes = dev->total_bytes;
 	memcpy(di_args->uuid, dev->uuid, sizeof(di_args->uuid));
-	strncpy(di_args->path, dev->name, sizeof(di_args->path));
+	if (dev->name)
+		strncpy(di_args->path, dev->name, sizeof(di_args->path));
+	else
+		di_args->path[0] = '\0';
 
 out:
 	if (ret == 0 && copy_to_user(arg, di_args, sizeof(*di_args)))

@@ -93,9 +93,8 @@ static void aio_free_ring(struct kioctx *ctx)
 		put_page(info->ring_pages[i]);
 
 	if (info->mmap_size) {
-		down_write(&ctx->mm->mmap_sem);
-		do_munmap(ctx->mm, info->mmap_base, info->mmap_size);
-		up_write(&ctx->mm->mmap_sem);
+		BUG_ON(ctx->mm != current->mm);
+		vm_munmap(info->mmap_base, info->mmap_size);
 	}
 
 	if (info->ring_pages && info->ring_pages != info->internal_pages)
@@ -389,6 +388,17 @@ void exit_aio(struct mm_struct *mm)
 				"exit_aio:ioctx still alive: %d %d %d\n",
 				atomic_read(&ctx->users), ctx->dead,
 				ctx->reqs_active);
+		/*
+		 * We don't need to bother with munmap() here -
+		 * exit_mmap(mm) is coming and it'll unmap everything.
+		 * Since aio_free_ring() uses non-zero ->mmap_size
+		 * as indicator that it needs to unmap the area,
+		 * just set it to 0; aio_free_ring() is the only
+		 * place that uses ->mmap_size, so it's safe.
+		 * That way we get all munmap done to current->mm -
+		 * all other callers have ctx->mm == current->mm.
+		 */
+		ctx->ring_info.mmap_size = 0;
 		put_ioctx(ctx);
 	}
 }
@@ -1084,9 +1094,9 @@ static int aio_read_evt(struct kioctx *ioctx, struct io_event *ent)
 	spin_unlock(&info->ring_lock);
 
 out:
-	kunmap_atomic(ring);
 	dprintk("leaving aio_read_evt: %d  h%lu t%lu\n", ret,
 		 (unsigned long)ring->head, (unsigned long)ring->tail);
+	kunmap_atomic(ring);
 	return ret;
 }
 
@@ -1446,6 +1456,10 @@ static ssize_t aio_setup_vectored_rw(int type, struct kiocb *kiocb, bool compat)
 	if (ret < 0)
 		goto out;
 
+	ret = rw_verify_area(type, kiocb->ki_filp, &kiocb->ki_pos, ret);
+	if (ret < 0)
+		goto out;
+
 	kiocb->ki_nr_segs = kiocb->ki_nbytes;
 	kiocb->ki_cur_seg = 0;
 	/* ki_nbytes/left now reflect bytes instead of segs */
@@ -1457,11 +1471,17 @@ out:
 	return ret;
 }
 
-static ssize_t aio_setup_single_vector(struct kiocb *kiocb)
+static ssize_t aio_setup_single_vector(int type, struct file * file, struct kiocb *kiocb)
 {
+	int bytes;
+
+	bytes = rw_verify_area(type, file, &kiocb->ki_pos, kiocb->ki_left);
+	if (bytes < 0)
+		return bytes;
+
 	kiocb->ki_iovec = &kiocb->ki_inline_vec;
 	kiocb->ki_iovec->iov_base = kiocb->ki_buf;
-	kiocb->ki_iovec->iov_len = kiocb->ki_left;
+	kiocb->ki_iovec->iov_len = bytes;
 	kiocb->ki_nr_segs = 1;
 	kiocb->ki_cur_seg = 0;
 	return 0;
@@ -1486,10 +1506,7 @@ static ssize_t aio_setup_iocb(struct kiocb *kiocb, bool compat)
 		if (unlikely(!access_ok(VERIFY_WRITE, kiocb->ki_buf,
 			kiocb->ki_left)))
 			break;
-		ret = security_file_permission(file, MAY_READ);
-		if (unlikely(ret))
-			break;
-		ret = aio_setup_single_vector(kiocb);
+		ret = aio_setup_single_vector(READ, file, kiocb);
 		if (ret)
 			break;
 		ret = -EINVAL;
@@ -1504,10 +1521,7 @@ static ssize_t aio_setup_iocb(struct kiocb *kiocb, bool compat)
 		if (unlikely(!access_ok(VERIFY_READ, kiocb->ki_buf,
 			kiocb->ki_left)))
 			break;
-		ret = security_file_permission(file, MAY_WRITE);
-		if (unlikely(ret))
-			break;
-		ret = aio_setup_single_vector(kiocb);
+		ret = aio_setup_single_vector(WRITE, file, kiocb);
 		if (ret)
 			break;
 		ret = -EINVAL;
@@ -1517,9 +1531,6 @@ static ssize_t aio_setup_iocb(struct kiocb *kiocb, bool compat)
 	case IOCB_CMD_PREADV:
 		ret = -EBADF;
 		if (unlikely(!(file->f_mode & FMODE_READ)))
-			break;
-		ret = security_file_permission(file, MAY_READ);
-		if (unlikely(ret))
 			break;
 		ret = aio_setup_vectored_rw(READ, kiocb, compat);
 		if (ret)
@@ -1531,9 +1542,6 @@ static ssize_t aio_setup_iocb(struct kiocb *kiocb, bool compat)
 	case IOCB_CMD_PWRITEV:
 		ret = -EBADF;
 		if (unlikely(!(file->f_mode & FMODE_WRITE)))
-			break;
-		ret = security_file_permission(file, MAY_WRITE);
-		if (unlikely(ret))
 			break;
 		ret = aio_setup_vectored_rw(WRITE, kiocb, compat);
 		if (ret)

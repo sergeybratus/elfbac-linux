@@ -958,6 +958,15 @@ struct radeon_encoder_primary_dac *radeon_combios_get_primary_dac_info(struct
 			found = 1;
 	}
 
+	/* quirks */
+	/* Radeon 9100 (R200) */
+	if ((dev->pdev->device == 0x514D) &&
+	    (dev->pdev->subsystem_vendor == 0x174B) &&
+	    (dev->pdev->subsystem_device == 0x7149)) {
+		/* vbios value is bad, use the default */
+		found = 0;
+	}
+
 	if (!found) /* fallback to defaults */
 		radeon_legacy_get_primary_dac_info_from_table(rdev, p_dac);
 
@@ -2338,6 +2347,14 @@ bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev)
 								   1),
 								  ATOM_DEVICE_CRT1_SUPPORT);
 				}
+				/* RV100 board with external TDMS bit mis-set.
+				 * Actually uses internal TMDS, clear the bit.
+				 */
+				if (dev->pdev->device == 0x5159 &&
+				    dev->pdev->subsystem_vendor == 0x1014 &&
+				    dev->pdev->subsystem_device == 0x029A) {
+					tmp &= ~(1 << 4);
+				}
 				if ((tmp >> 4) & 0x1) {
 					devices |= ATOM_DEVICE_DFP2_SUPPORT;
 					radeon_add_legacy_encoder(dev,
@@ -2845,7 +2862,7 @@ bool radeon_combios_external_tmds_setup(struct drm_encoder *encoder)
 					case 4:
 						val = RBIOS16(index);
 						index += 2;
-						udelay(val * 1000);
+						mdelay(val);
 						break;
 					case 6:
 						slave_addr = id & 0xff;
@@ -3044,7 +3061,7 @@ static void combios_parse_pll_table(struct drm_device *dev, uint16_t offset)
 					udelay(150);
 					break;
 				case 2:
-					udelay(1000);
+					mdelay(1);
 					break;
 				case 3:
 					while (tmp--) {
@@ -3075,13 +3092,13 @@ static void combios_parse_pll_table(struct drm_device *dev, uint16_t offset)
 						/*mclk_cntl |= 0x00001111;*//* ??? */
 						WREG32_PLL(RADEON_MCLK_CNTL,
 							   mclk_cntl);
-						udelay(10000);
+						mdelay(10);
 #endif
 						WREG32_PLL
 						    (RADEON_CLK_PWRMGT_CNTL,
 						     tmp &
 						     ~RADEON_CG_NO1_DEBUG_0);
-						udelay(10000);
+						mdelay(10);
 					}
 					break;
 				default:

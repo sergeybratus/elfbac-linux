@@ -1712,6 +1712,7 @@ static int process_checks(struct r1bio *r1_bio)
 	struct r1conf *conf = mddev->private;
 	int primary;
 	int i;
+	int vcnt;
 
 	for (primary = 0; primary < conf->raid_disks * 2; primary++)
 		if (r1_bio->bios[primary]->bi_end_io == end_sync_read &&
@@ -1721,9 +1722,9 @@ static int process_checks(struct r1bio *r1_bio)
 			break;
 		}
 	r1_bio->read_disk = primary;
+	vcnt = (r1_bio->sectors + PAGE_SIZE / 512 - 1) >> (PAGE_SHIFT - 9);
 	for (i = 0; i < conf->raid_disks * 2; i++) {
 		int j;
-		int vcnt = r1_bio->sectors >> (PAGE_SHIFT- 9);
 		struct bio *pbio = r1_bio->bios[primary];
 		struct bio *sbio = r1_bio->bios[i];
 		int size;
@@ -1738,7 +1739,7 @@ static int process_checks(struct r1bio *r1_bio)
 				s = sbio->bi_io_vec[j].bv_page;
 				if (memcmp(page_address(p),
 					   page_address(s),
-					   PAGE_SIZE))
+					   sbio->bi_io_vec[j].bv_len))
 					break;
 			}
 		} else
@@ -1820,8 +1821,14 @@ static void sync_request_write(struct mddev *mddev, struct r1bio *r1_bio)
 
 	if (atomic_dec_and_test(&r1_bio->remaining)) {
 		/* if we're here, all write(s) have completed, so clean up */
-		md_done_sync(mddev, r1_bio->sectors, 1);
-		put_buf(r1_bio);
+		int s = r1_bio->sectors;
+		if (test_bit(R1BIO_MadeGood, &r1_bio->state) ||
+		    test_bit(R1BIO_WriteError, &r1_bio->state))
+			reschedule_retry(r1_bio);
+		else {
+			put_buf(r1_bio);
+			md_done_sync(mddev, s, 1);
+		}
 	}
 }
 
@@ -2386,8 +2393,7 @@ static sector_t sync_request(struct mddev *mddev, sector_t sector_nr, int *skipp
 		int ok = 1;
 		for (i = 0 ; i < conf->raid_disks * 2 ; i++)
 			if (r1_bio->bios[i]->bi_end_io == end_sync_write) {
-				struct md_rdev *rdev =
-					rcu_dereference(conf->mirrors[i].rdev);
+				struct md_rdev *rdev = conf->mirrors[i].rdev;
 				ok = rdev_set_badblocks(rdev, sector_nr,
 							min_bad, 0
 					) && ok;
@@ -2423,7 +2429,10 @@ static sector_t sync_request(struct mddev *mddev, sector_t sector_nr, int *skipp
 		/* There is nowhere to write, so all non-sync
 		 * drives must be failed - so we are finished
 		 */
-		sector_t rv = max_sector - sector_nr;
+		sector_t rv;
+		if (min_bad > 0)
+			max_sector = sector_nr + min_bad;
+		rv = max_sector - sector_nr;
 		*skipped = 1;
 		put_buf(r1_bio);
 		return rv;
@@ -2486,9 +2495,10 @@ static sector_t sync_request(struct mddev *mddev, sector_t sector_nr, int *skipp
 	 */
 	if (test_bit(MD_RECOVERY_REQUESTED, &mddev->recovery)) {
 		atomic_set(&r1_bio->remaining, read_targets);
-		for (i = 0; i < conf->raid_disks * 2; i++) {
+		for (i = 0; i < conf->raid_disks * 2 && read_targets; i++) {
 			bio = r1_bio->bios[i];
 			if (bio->bi_end_io == end_sync_read) {
+				read_targets--;
 				md_sync_acct(bio->bi_bdev, nr_sectors);
 				generic_make_request(bio);
 			}
@@ -2548,18 +2558,22 @@ static struct r1conf *setup_conf(struct mddev *mddev)
 	err = -EINVAL;
 	spin_lock_init(&conf->device_lock);
 	rdev_for_each(rdev, mddev) {
+		struct request_queue *q;
 		int disk_idx = rdev->raid_disk;
 		if (disk_idx >= mddev->raid_disks
 		    || disk_idx < 0)
 			continue;
 		if (test_bit(Replacement, &rdev->flags))
-			disk = conf->mirrors + conf->raid_disks + disk_idx;
+			disk = conf->mirrors + mddev->raid_disks + disk_idx;
 		else
 			disk = conf->mirrors + disk_idx;
 
 		if (disk->rdev)
 			goto abort;
 		disk->rdev = rdev;
+		q = bdev_get_queue(rdev->bdev);
+		if (q->merge_bvec_fn)
+			mddev->merge_check_needed = 1;
 
 		disk->head_position = 0;
 	}
@@ -2636,11 +2650,13 @@ static struct r1conf *setup_conf(struct mddev *mddev)
 	return ERR_PTR(err);
 }
 
+static int stop(struct mddev *mddev);
 static int run(struct mddev *mddev)
 {
 	struct r1conf *conf;
 	int i;
 	struct md_rdev *rdev;
+	int ret;
 
 	if (mddev->level != 1) {
 		printk(KERN_ERR "md/raid1:%s: raid level not set to mirroring (%d)\n",
@@ -2705,7 +2721,11 @@ static int run(struct mddev *mddev)
 		mddev->queue->backing_dev_info.congested_data = mddev;
 		blk_queue_merge_bvec(mddev->queue, raid1_mergeable_bvec);
 	}
-	return md_integrity_register(mddev);
+
+	ret =  md_integrity_register(mddev);
+	if (ret)
+		stop(mddev);
+	return ret;
 }
 
 static int stop(struct mddev *mddev)

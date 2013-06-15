@@ -67,6 +67,7 @@ static int dapm_up_seq[] = {
 	[snd_soc_dapm_out_drv] = 10,
 	[snd_soc_dapm_hp] = 10,
 	[snd_soc_dapm_spk] = 10,
+	[snd_soc_dapm_line] = 10,
 	[snd_soc_dapm_post] = 11,
 };
 
@@ -75,6 +76,7 @@ static int dapm_down_seq[] = {
 	[snd_soc_dapm_adc] = 1,
 	[snd_soc_dapm_hp] = 2,
 	[snd_soc_dapm_spk] = 2,
+	[snd_soc_dapm_line] = 2,
 	[snd_soc_dapm_out_drv] = 2,
 	[snd_soc_dapm_pga] = 4,
 	[snd_soc_dapm_mixer_named_ctl] = 5,
@@ -1440,7 +1442,15 @@ static int dapm_power_widgets(struct snd_soc_dapm_context *dapm, int event)
 	}
 
 	list_for_each_entry(w, &card->widgets, list) {
-		list_del_init(&w->dirty);
+		switch (w->id) {
+		case snd_soc_dapm_pre:
+		case snd_soc_dapm_post:
+			/* These widgets always need to be powered */
+			break;
+		default:
+			list_del_init(&w->dirty);
+			break;
+		}
 
 		if (w->power) {
 			d = w->dapm;
@@ -1544,12 +1554,6 @@ static int dapm_power_widgets(struct snd_soc_dapm_context *dapm, int event)
 }
 
 #ifdef CONFIG_DEBUG_FS
-static int dapm_widget_power_open_file(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-	return 0;
-}
-
 static ssize_t dapm_widget_power_read_file(struct file *file,
 					   char __user *user_buf,
 					   size_t count, loff_t *ppos)
@@ -1613,16 +1617,10 @@ static ssize_t dapm_widget_power_read_file(struct file *file,
 }
 
 static const struct file_operations dapm_widget_power_fops = {
-	.open = dapm_widget_power_open_file,
+	.open = simple_open,
 	.read = dapm_widget_power_read_file,
 	.llseek = default_llseek,
 };
-
-static int dapm_bias_open_file(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-	return 0;
-}
 
 static ssize_t dapm_bias_read_file(struct file *file, char __user *user_buf,
 				   size_t count, loff_t *ppos)
@@ -1654,7 +1652,7 @@ static ssize_t dapm_bias_read_file(struct file *file, char __user *user_buf,
 }
 
 static const struct file_operations dapm_bias_fops = {
-	.open = dapm_bias_open_file,
+	.open = simple_open,
 	.read = dapm_bias_read_file,
 	.llseek = default_llseek,
 };
@@ -3255,7 +3253,7 @@ void snd_soc_dapm_shutdown(struct snd_soc_card *card)
 {
 	struct snd_soc_codec *codec;
 
-	list_for_each_entry(codec, &card->codec_dev_list, list) {
+	list_for_each_entry(codec, &card->codec_dev_list, card_list) {
 		soc_dapm_shutdown_codec(&codec->dapm);
 		if (codec->dapm.bias_level == SND_SOC_BIAS_STANDBY)
 			snd_soc_dapm_set_bias_level(&codec->dapm,

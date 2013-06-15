@@ -52,7 +52,7 @@ module_param_named(tjmax, force_tjmax, int, 0444);
 MODULE_PARM_DESC(tjmax, "TjMax value in degrees Celsius");
 
 #define BASE_SYSFS_ATTR_NO	2	/* Sysfs Base attr no for coretemp */
-#define NUM_REAL_CORES		16	/* Number of Real cores per cpu */
+#define NUM_REAL_CORES		32	/* Number of Real cores per cpu */
 #define CORETEMP_NAME_LENGTH	17	/* String Length of attrs */
 #define MAX_CORE_ATTRS		4	/* Maximum no of basic attrs */
 #define TOTAL_ATTRS		(MAX_CORE_ATTRS + 1)
@@ -664,7 +664,7 @@ static void __cpuinit get_core_online(unsigned int cpu)
 	 * sensors. We check this bit only, all the early CPUs
 	 * without thermal sensors will be filtered out.
 	 */
-	if (!cpu_has(c, X86_FEATURE_DTS))
+	if (!cpu_has(c, X86_FEATURE_DTHERM))
 		return;
 
 	if (!pdev) {
@@ -708,6 +708,10 @@ static void __cpuinit put_core_offline(unsigned int cpu)
 	pdata = platform_get_drvdata(pdev);
 
 	indx = TO_ATTR_NO(cpu);
+
+	/* The core id is too big, just return */
+	if (indx > MAX_CORE_DATA - 1)
+		return;
 
 	if (pdata->core_data[indx] && pdata->core_data[indx]->cpu == cpu)
 		coretemp_remove_core(pdata, &pdev->dev, indx);
@@ -761,7 +765,7 @@ static struct notifier_block coretemp_cpu_notifier __refdata = {
 };
 
 static const struct x86_cpu_id coretemp_ids[] = {
-	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_DTS },
+	{ X86_VENDOR_INTEL, X86_FAMILY_ANY, X86_MODEL_ANY, X86_FEATURE_DTHERM },
 	{}
 };
 MODULE_DEVICE_TABLE(x86cpu, coretemp_ids);

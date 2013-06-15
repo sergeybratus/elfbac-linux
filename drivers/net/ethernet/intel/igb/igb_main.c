@@ -238,6 +238,11 @@ MODULE_DESCRIPTION("Intel(R) Gigabit Ethernet Network Driver");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(DRV_VERSION);
 
+#define DEFAULT_MSG_ENABLE (NETIF_MSG_DRV|NETIF_MSG_PROBE|NETIF_MSG_LINK)
+static int debug = -1;
+module_param(debug, int, 0);
+MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
+
 struct igb_reg_info {
 	u32 ofs;
 	char *name;
@@ -946,16 +951,17 @@ static int igb_request_msix(struct igb_adapter *adapter)
 {
 	struct net_device *netdev = adapter->netdev;
 	struct e1000_hw *hw = &adapter->hw;
-	int i, err = 0, vector = 0;
+	int i, err = 0, vector = 0, free_vector = 0;
 
 	err = request_irq(adapter->msix_entries[vector].vector,
 	                  igb_msix_other, 0, netdev->name, adapter);
 	if (err)
-		goto out;
-	vector++;
+		goto err_out;
 
 	for (i = 0; i < adapter->num_q_vectors; i++) {
 		struct igb_q_vector *q_vector = adapter->q_vector[i];
+
+		vector++;
 
 		q_vector->itr_register = hw->hw_addr + E1000_EITR(vector);
 
@@ -975,13 +981,22 @@ static int igb_request_msix(struct igb_adapter *adapter)
 		                  igb_msix_ring, 0, q_vector->name,
 		                  q_vector);
 		if (err)
-			goto out;
-		vector++;
+			goto err_free;
 	}
 
 	igb_configure_msix(adapter);
 	return 0;
-out:
+
+err_free:
+	/* free already assigned IRQs */
+	free_irq(adapter->msix_entries[free_vector++].vector, adapter);
+
+	vector--;
+	for (i = 0; i < vector; i++) {
+		free_irq(adapter->msix_entries[free_vector++].vector,
+			 adapter->q_vector[i]);
+	}
+err_out:
 	return err;
 }
 
@@ -1106,9 +1121,12 @@ msi_only:
 		adapter->flags |= IGB_FLAG_HAS_MSI;
 out:
 	/* Notify the stack of the (possibly) reduced queue counts. */
+	rtnl_lock();
 	netif_set_real_num_tx_queues(adapter->netdev, adapter->num_tx_queues);
-	return netif_set_real_num_rx_queues(adapter->netdev,
-					    adapter->num_rx_queues);
+	err = netif_set_real_num_rx_queues(adapter->netdev,
+		adapter->num_rx_queues);
+	rtnl_unlock();
+	return err;
 }
 
 /**
@@ -1893,7 +1911,7 @@ static int __devinit igb_probe(struct pci_dev *pdev,
 	adapter->pdev = pdev;
 	hw = &adapter->hw;
 	hw->back = adapter;
-	adapter->msg_enable = NETIF_MSG_DRV | NETIF_MSG_PROBE;
+	adapter->msg_enable = netif_msg_init(debug, DEFAULT_MSG_ENABLE);
 
 	mmio_start = pci_resource_start(pdev, 0);
 	mmio_len = pci_resource_len(pdev, 0);
@@ -2766,8 +2784,6 @@ void igb_configure_tx_ring(struct igb_adapter *adapter,
 
 	txdctl |= E1000_TXDCTL_QUEUE_ENABLE;
 	wr32(E1000_TXDCTL(reg_idx), txdctl);
-
-	netdev_tx_reset_queue(txring_txq(ring));
 }
 
 /**
@@ -3276,6 +3292,8 @@ static void igb_clean_tx_ring(struct igb_ring *tx_ring)
 		buffer_info = &tx_ring->tx_buffer_info[i];
 		igb_unmap_and_free_tx_resource(tx_ring, buffer_info);
 	}
+
+	netdev_tx_reset_queue(txring_txq(tx_ring));
 
 	size = sizeof(struct igb_tx_buffer) * tx_ring->count;
 	memset(tx_ring->tx_buffer_info, 0, size);
@@ -4631,11 +4649,13 @@ void igb_update_stats(struct igb_adapter *adapter,
 	bytes = 0;
 	packets = 0;
 	for (i = 0; i < adapter->num_rx_queues; i++) {
-		u32 rqdpc_tmp = rd32(E1000_RQDPC(i)) & 0x0FFF;
+		u32 rqdpc = rd32(E1000_RQDPC(i));
 		struct igb_ring *ring = adapter->rx_ring[i];
 
-		ring->rx_stats.drops += rqdpc_tmp;
-		net_stats->rx_fifo_errors += rqdpc_tmp;
+		if (rqdpc) {
+			ring->rx_stats.drops += rqdpc;
+			net_stats->rx_fifo_errors += rqdpc;
+		}
 
 		do {
 			start = u64_stats_fetch_begin_bh(&ring->rx_syncp);
@@ -6791,18 +6811,7 @@ static int igb_resume(struct device *dev)
 	pci_enable_wake(pdev, PCI_D3hot, 0);
 	pci_enable_wake(pdev, PCI_D3cold, 0);
 
-	if (!rtnl_is_locked()) {
-		/*
-		 * shut up ASSERT_RTNL() warning in
-		 * netif_set_real_num_tx/rx_queues.
-		 */
-		rtnl_lock();
-		err = igb_init_interrupt_scheme(adapter);
-		rtnl_unlock();
-	} else {
-		err = igb_init_interrupt_scheme(adapter);
-	}
-	if (err) {
+	if (igb_init_interrupt_scheme(adapter)) {
 		dev_err(&pdev->dev, "Unable to allocate memory for queues\n");
 		return -ENOMEM;
 	}

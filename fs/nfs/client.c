@@ -694,8 +694,7 @@ static int nfs_create_rpc_client(struct nfs_client *clp,
  */
 static void nfs_destroy_server(struct nfs_server *server)
 {
-	if (!(server->flags & NFS_MOUNT_LOCAL_FLOCK) ||
-			!(server->flags & NFS_MOUNT_LOCAL_FCNTL))
+	if (server->nlm_host)
 		nlmclnt_done(server->nlm_host);
 }
 
@@ -1729,7 +1728,8 @@ error:
  */
 struct nfs_server *nfs_clone_server(struct nfs_server *source,
 				    struct nfs_fh *fh,
-				    struct nfs_fattr *fattr)
+				    struct nfs_fattr *fattr,
+				    rpc_authflavor_t flavor)
 {
 	struct nfs_server *server;
 	struct nfs_fattr *fattr_fsinfo;
@@ -1758,7 +1758,7 @@ struct nfs_server *nfs_clone_server(struct nfs_server *source,
 
 	error = nfs_init_server_rpcclient(server,
 			source->client->cl_timeout,
-			source->client->cl_auth->au_flavor);
+			flavor);
 	if (error < 0)
 		goto out_free_server;
 	if (!IS_ERR(source->client_acl))

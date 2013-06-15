@@ -189,7 +189,7 @@ enum ixgbe_ring_state_t {
 	__IXGBE_HANG_CHECK_ARMED,
 	__IXGBE_RX_RSC_ENABLED,
 	__IXGBE_RX_CSUM_UDP_ZERO_ERR,
-	__IXGBE_RX_FCOE_BUFSZ,
+	__IXGBE_RX_FCOE,
 };
 
 #define check_for_tx_hang(ring) \
@@ -283,7 +283,7 @@ struct ixgbe_ring_feature {
 #if defined(IXGBE_FCOE) && (PAGE_SIZE < 8192)
 static inline unsigned int ixgbe_rx_pg_order(struct ixgbe_ring *ring)
 {
-	return test_bit(__IXGBE_RX_FCOE_BUFSZ, &ring->state) ? 1 : 0;
+	return test_bit(__IXGBE_RX_FCOE, &ring->state) ? 1 : 0;
 }
 #else
 #define ixgbe_rx_pg_order(_ring) 0
@@ -544,7 +544,7 @@ struct ixgbe_fdir_filter {
 	u16 action;
 };
 
-enum ixbge_state_t {
+enum ixgbe_state_t {
 	__IXGBE_TESTING,
 	__IXGBE_RESETTING,
 	__IXGBE_DOWN,
@@ -574,9 +574,6 @@ extern struct ixgbe_info ixgbe_82599_info;
 extern struct ixgbe_info ixgbe_X540_info;
 #ifdef CONFIG_IXGBE_DCB
 extern const struct dcbnl_rtnl_ops dcbnl_ops;
-extern int ixgbe_copy_dcb_cfg(struct ixgbe_dcb_config *src_dcb_cfg,
-                              struct ixgbe_dcb_config *dst_dcb_cfg,
-                              int tc_max);
 #endif
 
 extern char ixgbe_driver_name[];

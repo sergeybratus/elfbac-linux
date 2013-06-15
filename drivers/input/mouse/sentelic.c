@@ -741,6 +741,14 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 			}
 		} else {
 			/* SFAC packet */
+			if ((packet[0] & (FSP_PB0_LBTN|FSP_PB0_PHY_BTN)) ==
+				FSP_PB0_LBTN) {
+				/* On-pad click in SFAC mode should be handled
+				 * by userspace.  On-pad clicks in MFMC mode
+				 * are real clickpad clicks, and not ignored.
+				 */
+				packet[0] &= ~FSP_PB0_LBTN;
+			}
 
 			/* no multi-finger information */
 			ad->last_mt_fgr = 0;
@@ -751,7 +759,7 @@ static psmouse_ret_t fsp_process_byte(struct psmouse *psmouse)
 			fsp_set_slot(dev, 0, fgrs > 0, abs_x, abs_y);
 			fsp_set_slot(dev, 1, false, 0, 0);
 		}
-		if (fgrs > 0) {
+		if (fgrs == 1 || (fgrs == 2 && !(packet[0] & FSP_PB0_MFMC_FGR2))) {
 			input_report_abs(dev, ABS_X, abs_x);
 			input_report_abs(dev, ABS_Y, abs_y);
 		}

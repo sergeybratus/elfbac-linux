@@ -213,7 +213,10 @@ static int slave_put(struct snd_kcontrol *kcontrol,
 	}
 	if (!changed)
 		return 0;
-	return slave_put_val(slave, ucontrol);
+	err = slave_put_val(slave, ucontrol);
+	if (err < 0)
+		return err;
+	return 1;
 }
 
 static int slave_tlv_cmd(struct snd_kcontrol *kcontrol,
@@ -419,6 +422,7 @@ EXPORT_SYMBOL(snd_ctl_make_virtual_master);
  * snd_ctl_add_vmaster_hook - Add a hook to a vmaster control
  * @kcontrol: vmaster kctl element
  * @hook: the hook function
+ * @private_data: the private_data pointer to be saved
  *
  * Adds the given hook to the vmaster control element so that it's called
  * at each time when the value is changed.

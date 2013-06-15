@@ -70,6 +70,7 @@ enum {
 	/* Mount options that take no arguments */
 	Opt_user_xattr, Opt_nouser_xattr,
 	Opt_forceuid, Opt_noforceuid,
+	Opt_forcegid, Opt_noforcegid,
 	Opt_noblocksend, Opt_noautotune,
 	Opt_hard, Opt_soft, Opt_perm, Opt_noperm,
 	Opt_mapchars, Opt_nomapchars, Opt_sfu,
@@ -109,6 +110,8 @@ enum {
 
 	/* Options which could be blank */
 	Opt_blank_pass,
+	Opt_blank_user,
+	Opt_blank_ip,
 
 	Opt_err
 };
@@ -119,6 +122,8 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_nouser_xattr, "nouser_xattr" },
 	{ Opt_forceuid, "forceuid" },
 	{ Opt_noforceuid, "noforceuid" },
+	{ Opt_forcegid, "forcegid" },
+	{ Opt_noforcegid, "noforcegid" },
 	{ Opt_noblocksend, "noblocksend" },
 	{ Opt_noautotune, "noautotune" },
 	{ Opt_hard, "hard" },
@@ -162,7 +167,8 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_sign, "sign" },
 	{ Opt_seal, "seal" },
 	{ Opt_direct, "direct" },
-	{ Opt_direct, "forceddirectio" },
+	{ Opt_direct, "directio" },
+	{ Opt_direct, "forcedirectio" },
 	{ Opt_strictcache, "strictcache" },
 	{ Opt_noac, "noac" },
 	{ Opt_fsc, "fsc" },
@@ -183,11 +189,15 @@ static const match_table_t cifs_mount_option_tokens = {
 	{ Opt_wsize, "wsize=%s" },
 	{ Opt_actimeo, "actimeo=%s" },
 
+	{ Opt_blank_user, "user=" },
+	{ Opt_blank_user, "username=" },
 	{ Opt_user, "user=%s" },
 	{ Opt_user, "username=%s" },
 	{ Opt_blank_pass, "pass=" },
 	{ Opt_pass, "pass=%s" },
 	{ Opt_pass, "password=%s" },
+	{ Opt_blank_ip, "ip=" },
+	{ Opt_blank_ip, "addr=" },
 	{ Opt_ip, "ip=%s" },
 	{ Opt_ip, "addr=%s" },
 	{ Opt_unc, "unc=%s" },
@@ -209,6 +219,8 @@ static const match_table_t cifs_mount_option_tokens = {
 
 	{ Opt_ignore, "cred" },
 	{ Opt_ignore, "credentials" },
+	{ Opt_ignore, "cred=%s" },
+	{ Opt_ignore, "credentials=%s" },
 	{ Opt_ignore, "guest" },
 	{ Opt_ignore, "rw" },
 	{ Opt_ignore, "ro" },
@@ -229,8 +241,8 @@ static const match_table_t cifs_mount_option_tokens = {
 enum {
 	Opt_sec_krb5, Opt_sec_krb5i, Opt_sec_krb5p,
 	Opt_sec_ntlmsspi, Opt_sec_ntlmssp,
-	Opt_ntlm, Opt_sec_ntlmi, Opt_sec_ntlmv2i,
-	Opt_sec_nontlm, Opt_sec_lanman,
+	Opt_ntlm, Opt_sec_ntlmi, Opt_sec_ntlmv2,
+	Opt_sec_ntlmv2i, Opt_sec_lanman,
 	Opt_sec_none,
 
 	Opt_sec_err
@@ -244,8 +256,9 @@ static const match_table_t cifs_secflavor_tokens = {
 	{ Opt_sec_ntlmssp, "ntlmssp" },
 	{ Opt_ntlm, "ntlm" },
 	{ Opt_sec_ntlmi, "ntlmi" },
+	{ Opt_sec_ntlmv2, "nontlm" },
+	{ Opt_sec_ntlmv2, "ntlmv2" },
 	{ Opt_sec_ntlmv2i, "ntlmv2i" },
-	{ Opt_sec_nontlm, "nontlm" },
 	{ Opt_sec_lanman, "lanman" },
 	{ Opt_sec_none, "none" },
 
@@ -1117,7 +1130,7 @@ static int get_option_ul(substring_t args[], unsigned long *option)
 	string = match_strdup(args);
 	if (string == NULL)
 		return -ENOMEM;
-	rc = kstrtoul(string, 10, option);
+	rc = kstrtoul(string, 0, option);
 	kfree(string);
 
 	return rc;
@@ -1154,7 +1167,7 @@ static int cifs_parse_security_flavors(char *value,
 	case Opt_sec_ntlmi:
 		vol->secFlg |= CIFSSEC_MAY_NTLM | CIFSSEC_MUST_SIGN;
 		break;
-	case Opt_sec_nontlm:
+	case Opt_sec_ntlmv2:
 		vol->secFlg |= CIFSSEC_MAY_NTLMV2;
 		break;
 	case Opt_sec_ntlmv2i:
@@ -1276,6 +1289,12 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			break;
 		case Opt_noforceuid:
 			override_uid = 0;
+			break;
+		case Opt_forcegid:
+			override_gid = 1;
+			break;
+		case Opt_noforcegid:
+			override_gid = 0;
 			break;
 		case Opt_noblocksend:
 			vol->noblocksnd = 1;
@@ -1534,15 +1553,17 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 
 		/* String Arguments */
 
+		case Opt_blank_user:
+			/* null user, ie. anonymous authentication */
+			vol->nullauth = 1;
+			vol->username = NULL;
+			break;
 		case Opt_user:
 			string = match_strdup(args);
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				/* null user, ie. anonymous authentication */
-				vol->nullauth = 1;
-			} else if (strnlen(string, MAX_USERNAME_SIZE) >
+			if (strnlen(string, MAX_USERNAME_SIZE) >
 							MAX_USERNAME_SIZE) {
 				printk(KERN_WARNING "CIFS: username too long\n");
 				goto cifs_parse_mount_err;
@@ -1555,18 +1576,27 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			}
 			break;
 		case Opt_blank_pass:
-			vol->password = NULL;
-			break;
-		case Opt_pass:
 			/* passwords have to be handled differently
 			 * to allow the character used for deliminator
 			 * to be passed within them
 			 */
 
+			/*
+			 * Check if this is a case where the  password
+			 * starts with a delimiter
+			 */
+			tmp_end = strchr(data, '=');
+			tmp_end++;
+			if (!(tmp_end < end && tmp_end[1] == delim)) {
+				/* No it is not. Set the password to NULL */
+				vol->password = NULL;
+				break;
+			}
+			/* Yes it is. Drop down to Opt_pass below.*/
+		case Opt_pass:
 			/* Obtain the value string */
 			value = strchr(data, '=');
-			if (value != NULL)
-				*value++ = '\0';
+			value++;
 
 			/* Set tmp_end to end of the string */
 			tmp_end = (char *) value + strlen(value);
@@ -1575,24 +1605,26 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			 * If yes, we have encountered a double deliminator
 			 * reset the NULL character to the deliminator
 			 */
-			if (tmp_end < end && tmp_end[1] == delim)
+			if (tmp_end < end && tmp_end[1] == delim) {
 				tmp_end[0] = delim;
 
-			/* Keep iterating until we get to a single deliminator
-			 * OR the end
-			 */
-			while ((tmp_end = strchr(tmp_end, delim)) != NULL &&
-			       (tmp_end[1] == delim)) {
-				tmp_end = (char *) &tmp_end[2];
-			}
+				/* Keep iterating until we get to a single
+				 * deliminator OR the end
+				 */
+				while ((tmp_end = strchr(tmp_end, delim))
+					!= NULL && (tmp_end[1] == delim)) {
+						tmp_end = (char *) &tmp_end[2];
+				}
 
-			/* Reset var options to point to next element */
-			if (tmp_end) {
-				tmp_end[0] = '\0';
-				options = (char *) &tmp_end[1];
-			} else
-				/* Reached the end of the mount option string */
-				options = end;
+				/* Reset var options to point to next element */
+				if (tmp_end) {
+					tmp_end[0] = '\0';
+					options = (char *) &tmp_end[1];
+				} else
+					/* Reached the end of the mount option
+					 * string */
+					options = end;
+			}
 
 			/* Now build new password string */
 			temp_len = strlen(value);
@@ -1612,14 +1644,15 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			}
 			vol->password[j] = '\0';
 			break;
+		case Opt_blank_ip:
+			vol->UNCip = NULL;
+			break;
 		case Opt_ip:
 			string = match_strdup(args);
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				vol->UNCip = NULL;
-			} else if (strnlen(string, INET6_ADDRSTRLEN) >
+			if (strnlen(string, INET6_ADDRSTRLEN) >
 						INET6_ADDRSTRLEN) {
 				printk(KERN_WARNING "CIFS: ip address "
 						    "too long\n");
@@ -1637,17 +1670,18 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: invalid path to "
-						    "network resource\n");
-				goto cifs_parse_mount_err;
-			}
-
 			temp_len = strnlen(string, 300);
 			if (temp_len  == 300) {
 				printk(KERN_WARNING "CIFS: UNC name too long\n");
 				goto cifs_parse_mount_err;
 			}
+
+			vol->UNC = kmalloc(temp_len+1, GFP_KERNEL);
+			if (vol->UNC == NULL) {
+				printk(KERN_WARNING "CIFS: no memory for UNC\n");
+				goto cifs_parse_mount_err;
+			}
+			strcpy(vol->UNC, string);
 
 			if (strncmp(string, "//", 2) == 0) {
 				vol->UNC[0] = '\\';
@@ -1658,24 +1692,13 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 				goto cifs_parse_mount_err;
 			}
 
-			vol->UNC = kmalloc(temp_len+1, GFP_KERNEL);
-			if (vol->UNC == NULL) {
-				printk(KERN_WARNING "CIFS: no memory "
-						    "for UNC\n");
-				goto cifs_parse_mount_err;
-			}
-			strcpy(vol->UNC, string);
 			break;
 		case Opt_domain:
 			string = match_strdup(args);
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: invalid domain"
-						    " name\n");
-				goto cifs_parse_mount_err;
-			} else if (strnlen(string, 256) == 256) {
+			if (strnlen(string, 256) == 256) {
 				printk(KERN_WARNING "CIFS: domain name too"
 						    " long\n");
 				goto cifs_parse_mount_err;
@@ -1694,11 +1717,7 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: srcaddr value not"
-						    " specified\n");
-				goto cifs_parse_mount_err;
-			} else if (!cifs_convert_address(
+			if (!cifs_convert_address(
 					(struct sockaddr *)&vol->srcaddr,
 					string, strlen(string))) {
 				printk(KERN_WARNING "CIFS:  Could not parse"
@@ -1711,11 +1730,6 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: Invalid path"
-						    " prefix\n");
-				goto cifs_parse_mount_err;
-			}
 			temp_len = strnlen(string, 1024);
 			if (string[0] != '/')
 				temp_len++; /* missing leading slash */
@@ -1743,11 +1757,7 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: Invalid iocharset"
-						    " specified\n");
-				goto cifs_parse_mount_err;
-			} else if (strnlen(string, 1024) >= 65) {
+			if (strnlen(string, 1024) >= 65) {
 				printk(KERN_WARNING "CIFS: iocharset name "
 						    "too long.\n");
 				goto cifs_parse_mount_err;
@@ -1772,11 +1782,6 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: No socket option"
-						    " specified\n");
-				goto cifs_parse_mount_err;
-			}
 			if (strnicmp(string, "TCP_NODELAY", 11) == 0)
 				vol->sockopt_tcp_nodelay = 1;
 			break;
@@ -1784,12 +1789,6 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			string = match_strdup(args);
 			if (string == NULL)
 				goto out_nomem;
-
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: Invalid (empty)"
-						    " netbiosname\n");
-				break;
-			}
 
 			memset(vol->source_rfc1001_name, 0x20,
 				RFC1001_NAME_LEN);
@@ -1818,11 +1817,6 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: Empty server"
-					" netbiosname specified\n");
-				break;
-			}
 			/* last byte, type, is 0x20 for servr type */
 			memset(vol->target_rfc1001_name, 0x20,
 				RFC1001_NAME_LEN_WITH_NULL);
@@ -1849,12 +1843,6 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			if (string == NULL)
 				goto out_nomem;
 
-			if (!*string) {
-				cERROR(1, "no protocol version specified"
-					  " after vers= mount option");
-				goto cifs_parse_mount_err;
-			}
-
 			if (strnicmp(string, "cifs", 4) == 0 ||
 			    strnicmp(string, "1", 1) == 0) {
 				/* This is the default */
@@ -1868,12 +1856,6 @@ cifs_parse_mount_options(const char *mountdata, const char *devname,
 			string = match_strdup(args);
 			if (string == NULL)
 				goto out_nomem;
-
-			if (!*string) {
-				printk(KERN_WARNING "CIFS: no security flavor"
-						    " specified\n");
-				break;
-			}
 
 			if (cifs_parse_security_flavors(string, vol) != 0)
 				goto cifs_parse_mount_err;
@@ -2226,6 +2208,7 @@ cifs_get_tcp_session(struct smb_vol *volume_info)
 	tcp_ses->session_estab = false;
 	tcp_ses->sequence_number = 0;
 	tcp_ses->lstrp = jiffies;
+	spin_lock_init(&tcp_ses->req_lock);
 	INIT_LIST_HEAD(&tcp_ses->tcp_ses_list);
 	INIT_LIST_HEAD(&tcp_ses->smb_ses_list);
 	INIT_DELAYED_WORK(&tcp_ses->echo, cifs_echo_request);
@@ -3271,10 +3254,6 @@ void cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 
 	cifs_sb->mnt_uid = pvolume_info->linux_uid;
 	cifs_sb->mnt_gid = pvolume_info->linux_gid;
-	if (pvolume_info->backupuid_specified)
-		cifs_sb->mnt_backupuid = pvolume_info->backupuid;
-	if (pvolume_info->backupgid_specified)
-		cifs_sb->mnt_backupgid = pvolume_info->backupgid;
 	cifs_sb->mnt_file_mode = pvolume_info->file_mode;
 	cifs_sb->mnt_dir_mode = pvolume_info->dir_mode;
 	cFYI(1, "file mode: 0x%hx  dir mode: 0x%hx",
@@ -3305,10 +3284,14 @@ void cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 		cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_RWPIDFORWARD;
 	if (pvolume_info->cifs_acl)
 		cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_CIFS_ACL;
-	if (pvolume_info->backupuid_specified)
+	if (pvolume_info->backupuid_specified) {
 		cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_CIFS_BACKUPUID;
-	if (pvolume_info->backupgid_specified)
+		cifs_sb->mnt_backupuid = pvolume_info->backupuid;
+	}
+	if (pvolume_info->backupgid_specified) {
 		cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_CIFS_BACKUPGID;
+		cifs_sb->mnt_backupgid = pvolume_info->backupgid;
+	}
 	if (pvolume_info->override_uid)
 		cifs_sb->mnt_cifs_flags |= CIFS_MOUNT_OVERR_UID;
 	if (pvolume_info->override_gid)
@@ -3385,6 +3368,18 @@ void cifs_setup_cifs_sb(struct smb_vol *pvolume_info,
 #define CIFS_DEFAULT_NON_POSIX_RSIZE (60 * 1024)
 #define CIFS_DEFAULT_NON_POSIX_WSIZE (65536)
 
+/*
+ * On hosts with high memory, we can't currently support wsize/rsize that are
+ * larger than we can kmap at once. Cap the rsize/wsize at
+ * LAST_PKMAP * PAGE_SIZE. We'll never be able to fill a read or write request
+ * larger than that anyway.
+ */
+#ifdef CONFIG_HIGHMEM
+#define CIFS_KMAP_SIZE_LIMIT	(LAST_PKMAP * PAGE_CACHE_SIZE)
+#else /* CONFIG_HIGHMEM */
+#define CIFS_KMAP_SIZE_LIMIT	(1<<24)
+#endif /* CONFIG_HIGHMEM */
+
 static unsigned int
 cifs_negotiate_wsize(struct cifs_tcon *tcon, struct smb_vol *pvolume_info)
 {
@@ -3415,6 +3410,9 @@ cifs_negotiate_wsize(struct cifs_tcon *tcon, struct smb_vol *pvolume_info)
 		wsize = min_t(unsigned int, wsize,
 				server->maxBuf - sizeof(WRITE_REQ) + 4);
 
+	/* limit to the amount that we can kmap at once */
+	wsize = min_t(unsigned int, wsize, CIFS_KMAP_SIZE_LIMIT);
+
 	/* hard limit of CIFS_MAX_WSIZE */
 	wsize = min_t(unsigned int, wsize, CIFS_MAX_WSIZE);
 
@@ -3435,18 +3433,15 @@ cifs_negotiate_rsize(struct cifs_tcon *tcon, struct smb_vol *pvolume_info)
 	 * MS-CIFS indicates that servers are only limited by the client's
 	 * bufsize for reads, testing against win98se shows that it throws
 	 * INVALID_PARAMETER errors if you try to request too large a read.
+	 * OS/2 just sends back short reads.
 	 *
-	 * If the server advertises a MaxBufferSize of less than one page,
-	 * assume that it also can't satisfy reads larger than that either.
-	 *
-	 * FIXME: Is there a better heuristic for this?
+	 * If the server doesn't advertise CAP_LARGE_READ_X, then assume that
+	 * it can't handle a read request larger than its MaxBufferSize either.
 	 */
 	if (tcon->unix_ext && (unix_cap & CIFS_UNIX_LARGE_READ_CAP))
 		defsize = CIFS_DEFAULT_IOSIZE;
 	else if (server->capabilities & CAP_LARGE_READ_X)
 		defsize = CIFS_DEFAULT_NON_POSIX_RSIZE;
-	else if (server->maxBuf >= PAGE_CACHE_SIZE)
-		defsize = CIFSMaxBufSize;
 	else
 		defsize = server->maxBuf - sizeof(READ_RSP);
 
@@ -3458,6 +3453,9 @@ cifs_negotiate_rsize(struct cifs_tcon *tcon, struct smb_vol *pvolume_info)
 	 */
 	if (!(server->capabilities & CAP_LARGE_READ_X))
 		rsize = min_t(unsigned int, CIFSMaxBufSize, rsize);
+
+	/* limit to the amount that we can kmap at once */
+	rsize = min_t(unsigned int, rsize, CIFS_KMAP_SIZE_LIMIT);
 
 	/* hard limit of CIFS_MAX_RSIZE */
 	rsize = min_t(unsigned int, rsize, CIFS_MAX_RSIZE);
@@ -3657,22 +3655,6 @@ cifs_get_volume_info(char *mount_data, const char *devname)
 	return volume_info;
 }
 
-/* make sure ra_pages is a multiple of rsize */
-static inline unsigned int
-cifs_ra_pages(struct cifs_sb_info *cifs_sb)
-{
-	unsigned int reads;
-	unsigned int rsize_pages = cifs_sb->rsize / PAGE_CACHE_SIZE;
-
-	if (rsize_pages >= default_backing_dev_info.ra_pages)
-		return default_backing_dev_info.ra_pages;
-	else if (rsize_pages == 0)
-		return rsize_pages;
-
-	reads = default_backing_dev_info.ra_pages / rsize_pages;
-	return reads * rsize_pages;
-}
-
 int
 cifs_mount(struct cifs_sb_info *cifs_sb, struct smb_vol *volume_info)
 {
@@ -3760,7 +3742,7 @@ try_mount_again:
 	cifs_sb->rsize = cifs_negotiate_rsize(tcon, volume_info);
 
 	/* tune readahead according to rsize */
-	cifs_sb->bdi.ra_pages = cifs_ra_pages(cifs_sb);
+	cifs_sb->bdi.ra_pages = cifs_sb->rsize / PAGE_CACHE_SIZE;
 
 remote_path_check:
 #ifdef CONFIG_CIFS_DFS_UPCALL

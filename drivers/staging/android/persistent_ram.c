@@ -79,23 +79,6 @@ static inline void buffer_size_add(struct persistent_ram_zone *prz, size_t a)
 	} while (atomic_cmpxchg(&prz->buffer->size, old, new) != old);
 }
 
-/* increase the size counter, retuning an error if it hits the max size */
-static inline ssize_t buffer_size_add_clamp(struct persistent_ram_zone *prz,
-	size_t a)
-{
-	size_t old;
-	size_t new;
-
-	do {
-		old = atomic_read(&prz->buffer->size);
-		new = old + a;
-		if (new > prz->buffer_size)
-			return -ENOMEM;
-	} while (atomic_cmpxchg(&prz->buffer->size, old, new) != old);
-
-	return 0;
-}
-
 static void notrace persistent_ram_encode_rs8(struct persistent_ram_zone *prz,
 	uint8_t *data, size_t len, uint8_t *ecc)
 {
@@ -300,7 +283,7 @@ int notrace persistent_ram_write(struct persistent_ram_zone *prz,
 		c = prz->buffer_size;
 	}
 
-	buffer_size_add_clamp(prz, c);
+	buffer_size_add(prz, c);
 
 	start = buffer_start_add(prz, c);
 
@@ -399,12 +382,12 @@ static  __init
 struct persistent_ram_zone *__persistent_ram_init(struct device *dev, bool ecc)
 {
 	struct persistent_ram_zone *prz;
-	int ret;
+	int ret = -ENOMEM;
 
 	prz = kzalloc(sizeof(struct persistent_ram_zone), GFP_KERNEL);
 	if (!prz) {
 		pr_err("persistent_ram: failed to allocate persistent ram zone\n");
-		return ERR_PTR(-ENOMEM);
+		goto err;
 	}
 
 	INIT_LIST_HEAD(&prz->node);
@@ -412,13 +395,13 @@ struct persistent_ram_zone *__persistent_ram_init(struct device *dev, bool ecc)
 	ret = persistent_ram_buffer_init(dev_name(dev), prz);
 	if (ret) {
 		pr_err("persistent_ram: failed to initialize buffer\n");
-		return ERR_PTR(ret);
+		goto err;
 	}
 
 	prz->ecc = ecc;
 	ret = persistent_ram_init_ecc(prz, prz->buffer_size);
 	if (ret)
-		return ERR_PTR(ret);
+		goto err;
 
 	if (prz->buffer->sig == PERSISTENT_RAM_SIG) {
 		if (buffer_size(prz) > prz->buffer_size ||
@@ -442,6 +425,9 @@ struct persistent_ram_zone *__persistent_ram_init(struct device *dev, bool ecc)
 	atomic_set(&prz->buffer->size, 0);
 
 	return prz;
+err:
+	kfree(prz);
+	return ERR_PTR(ret);
 }
 
 struct persistent_ram_zone * __init

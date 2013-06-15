@@ -409,8 +409,6 @@ static irqreturn_t ab3100_irq_handler(int irq, void *data)
 	u32 fatevent;
 	int err;
 
-	add_interrupt_randomness(irq);
-
 	err = ab3100_get_register_page_interruptible(ab3100, AB3100_EVENTA1,
 				       event_regs, 3);
 	if (err)
@@ -482,12 +480,6 @@ struct ab3100_get_set_reg_priv {
 	struct ab3100 *ab3100;
 	bool mode;
 };
-
-static int ab3100_get_set_reg_open_file(struct inode *inode, struct file *file)
-{
-	file->private_data = inode->i_private;
-	return 0;
-}
 
 static ssize_t ab3100_get_set_reg(struct file *file,
 				  const char __user *user_buf,
@@ -583,7 +575,7 @@ static ssize_t ab3100_get_set_reg(struct file *file,
 }
 
 static const struct file_operations ab3100_get_set_reg_fops = {
-	.open = ab3100_get_set_reg_open_file,
+	.open = simple_open,
 	.write = ab3100_get_set_reg,
 	.llseek = noop_llseek,
 };
@@ -939,9 +931,6 @@ static int __devinit ab3100_probe(struct i2c_client *client,
 
 	err = request_threaded_irq(client->irq, NULL, ab3100_irq_handler,
 				IRQF_ONESHOT, "ab3100-core", ab3100);
-	/* This real unpredictable IRQ is of course sampled for entropy */
-	rand_initialize_irq(client->irq);
-
 	if (err)
 		goto exit_no_irq;
 

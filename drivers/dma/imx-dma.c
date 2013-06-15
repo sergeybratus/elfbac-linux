@@ -473,8 +473,10 @@ static int imxdma_xfer_desc(struct imxdma_desc *d)
 			slot = i;
 			break;
 		}
-		if (slot < 0)
+		if (slot < 0) {
+			spin_unlock_irqrestore(&imxdma->lock, flags);
 			return -EBUSY;
+		}
 
 		imxdma->slots_2d[slot].xsr = d->x;
 		imxdma->slots_2d[slot].ysr = d->y;
@@ -571,11 +573,14 @@ static void imxdma_tasklet(unsigned long data)
 	if (desc->desc.callback)
 		desc->desc.callback(desc->desc.callback_param);
 
-	dma_cookie_complete(&desc->desc);
-
-	/* If we are dealing with a cyclic descriptor keep it on ld_active */
+	/* If we are dealing with a cyclic descriptor keep it on ld_active
+	 * and dont mark the descripor as complete.
+	 * Only in non-cyclic cases it would be marked as complete
+	 */
 	if (imxdma_chan_is_doing_cyclic(imxdmac))
 		goto out;
+	else
+		dma_cookie_complete(&desc->desc);
 
 	/* Free 2D slot if it was an interleaved transfer */
 	if (imxdmac->enabled_2d) {

@@ -139,8 +139,11 @@ int drm_open(struct inode *inode, struct file *filp)
 	retcode = drm_open_helper(inode, filp, dev);
 	if (!retcode) {
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
-		if (!dev->open_count++)
+		if (!dev->open_count++) {
 			retcode = drm_setup(dev);
+			if (retcode)
+				dev->open_count--;
+		}
 	}
 	if (!retcode) {
 		mutex_lock(&dev->struct_mutex);
@@ -270,6 +273,9 @@ static int drm_open_helper(struct inode *inode, struct file *filp,
 
 	if (dev->driver->driver_features & DRIVER_GEM)
 		drm_gem_open(dev, priv);
+
+	if (drm_core_check_feature(dev, DRIVER_PRIME))
+		drm_prime_init_file_private(&priv->prime);
 
 	if (dev->driver->open) {
 		ret = dev->driver->open(dev, priv);
@@ -504,11 +510,11 @@ int drm_release(struct inode *inode, struct file *filp)
 
 	drm_events_release(file_priv);
 
-	if (dev->driver->driver_features & DRIVER_GEM)
-		drm_gem_release(dev, file_priv);
-
 	if (dev->driver->driver_features & DRIVER_MODESET)
 		drm_fb_release(file_priv);
+
+	if (dev->driver->driver_features & DRIVER_GEM)
+		drm_gem_release(dev, file_priv);
 
 	mutex_lock(&dev->ctxlist_mutex);
 	if (!list_empty(&dev->ctxlist)) {
@@ -571,6 +577,10 @@ int drm_release(struct inode *inode, struct file *filp)
 
 	if (dev->driver->postclose)
 		dev->driver->postclose(dev, file_priv);
+
+	if (drm_core_check_feature(dev, DRIVER_PRIME))
+		drm_prime_destroy_file_private(&file_priv->prime);
+
 	kfree(file_priv);
 
 	/* ========================================================

@@ -298,20 +298,31 @@ static ssize_t reload_store(struct device *dev,
 			    const char *buf, size_t size)
 {
 	unsigned long val;
-	int cpu = dev->id;
-	int ret = 0;
-	char *end;
+	int cpu;
+	ssize_t ret = 0, tmp_ret;
 
-	val = simple_strtoul(buf, &end, 0);
-	if (end == buf)
+	/* allow reload only from the BSP */
+	if (boot_cpu_data.cpu_index != dev->id)
 		return -EINVAL;
 
-	if (val == 1) {
-		get_online_cpus();
-		if (cpu_online(cpu))
-			ret = reload_for_cpu(cpu);
-		put_online_cpus();
+	ret = kstrtoul(buf, 0, &val);
+	if (ret)
+		return ret;
+
+	if (val != 1)
+		return size;
+
+	get_online_cpus();
+	for_each_online_cpu(cpu) {
+		tmp_ret = reload_for_cpu(cpu);
+		if (tmp_ret != 0)
+			pr_warn("Error reloading microcode on CPU %d\n", cpu);
+
+		/* save retval of the first encountered reload error */
+		if (!ret)
+			ret = tmp_ret;
 	}
+	put_online_cpus();
 
 	if (!ret)
 		ret = size;
@@ -419,10 +430,8 @@ static int mc_device_add(struct device *dev, struct subsys_interface *sif)
 	if (err)
 		return err;
 
-	if (microcode_init_cpu(cpu) == UCODE_ERROR) {
-		sysfs_remove_group(&dev->kobj, &mc_attr_group);
+	if (microcode_init_cpu(cpu) == UCODE_ERROR)
 		return -EINVAL;
-	}
 
 	return err;
 }
@@ -528,11 +537,11 @@ static int __init microcode_init(void)
 		microcode_ops = init_intel_microcode();
 	else if (c->x86_vendor == X86_VENDOR_AMD)
 		microcode_ops = init_amd_microcode();
-
-	if (!microcode_ops) {
+	else
 		pr_err("no support for this CPU vendor\n");
+
+	if (!microcode_ops)
 		return -ENODEV;
-	}
 
 	microcode_pdev = platform_device_register_simple("microcode", -1,
 							 NULL, 0);

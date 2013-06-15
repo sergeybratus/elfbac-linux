@@ -28,23 +28,33 @@
 #include "internal.h"
 #include "sleep.h"
 
+u8 wake_sleep_flags = ACPI_NO_OPTIONAL_METHODS;
 static unsigned int gts, bfs;
-module_param(gts, uint, 0644);
-module_param(bfs, uint, 0644);
+static int set_param_wake_flag(const char *val, struct kernel_param *kp)
+{
+	int ret = param_set_int(val, kp);
+
+	if (ret)
+		return ret;
+
+	if (kp->arg == (const char *)&gts) {
+		if (gts)
+			wake_sleep_flags |= ACPI_EXECUTE_GTS;
+		else
+			wake_sleep_flags &= ~ACPI_EXECUTE_GTS;
+	}
+	if (kp->arg == (const char *)&bfs) {
+		if (bfs)
+			wake_sleep_flags |= ACPI_EXECUTE_BFS;
+		else
+			wake_sleep_flags &= ~ACPI_EXECUTE_BFS;
+	}
+	return ret;
+}
+module_param_call(gts, set_param_wake_flag, param_get_int, &gts, 0644);
+module_param_call(bfs, set_param_wake_flag, param_get_int, &bfs, 0644);
 MODULE_PARM_DESC(gts, "Enable evaluation of _GTS on suspend.");
 MODULE_PARM_DESC(bfs, "Enable evaluation of _BFS on resume".);
-
-static u8 wake_sleep_flags(void)
-{
-	u8 flags = ACPI_NO_OPTIONAL_METHODS;
-
-	if (gts)
-		flags |= ACPI_EXECUTE_GTS;
-	if (bfs)
-		flags |= ACPI_EXECUTE_BFS;
-
-	return flags;
-}
 
 static u8 sleep_states[ACPI_S_STATE_COUNT];
 
@@ -128,244 +138,9 @@ void __init acpi_old_suspend_ordering(void)
 	old_suspend_ordering = true;
 }
 
-/**
- * acpi_pm_freeze - Disable the GPEs and suspend EC transactions.
- */
-static int acpi_pm_freeze(void)
-{
-	acpi_disable_all_gpes();
-	acpi_os_wait_events_complete(NULL);
-	acpi_ec_block_transactions();
-	return 0;
-}
-
-/**
- * acpi_pre_suspend - Enable wakeup devices, "freeze" EC and save NVS.
- */
-static int acpi_pm_pre_suspend(void)
-{
-	acpi_pm_freeze();
-	return suspend_nvs_save();
-}
-
-/**
- *	__acpi_pm_prepare - Prepare the platform to enter the target state.
- *
- *	If necessary, set the firmware waking vector and do arch-specific
- *	nastiness to get the wakeup code to the waking vector.
- */
-static int __acpi_pm_prepare(void)
-{
-	int error = acpi_sleep_prepare(acpi_target_sleep_state);
-	if (error)
-		acpi_target_sleep_state = ACPI_STATE_S0;
-
-	return error;
-}
-
-/**
- *	acpi_pm_prepare - Prepare the platform to enter the target sleep
- *		state and disable the GPEs.
- */
-static int acpi_pm_prepare(void)
-{
-	int error = __acpi_pm_prepare();
-	if (!error)
-		error = acpi_pm_pre_suspend();
-
-	return error;
-}
-
-/**
- *	acpi_pm_finish - Instruct the platform to leave a sleep state.
- *
- *	This is called after we wake back up (or if entering the sleep state
- *	failed).
- */
-static void acpi_pm_finish(void)
-{
-	u32 acpi_state = acpi_target_sleep_state;
-
-	acpi_ec_unblock_transactions();
-	suspend_nvs_free();
-
-	if (acpi_state == ACPI_STATE_S0)
-		return;
-
-	printk(KERN_INFO PREFIX "Waking up from system sleep state S%d\n",
-		acpi_state);
-	acpi_disable_wakeup_devices(acpi_state);
-	acpi_leave_sleep_state(acpi_state);
-
-	/* reset firmware waking vector */
-	acpi_set_firmware_waking_vector((acpi_physical_address) 0);
-
-	acpi_target_sleep_state = ACPI_STATE_S0;
-}
-
-/**
- *	acpi_pm_end - Finish up suspend sequence.
- */
-static void acpi_pm_end(void)
-{
-	/*
-	 * This is necessary in case acpi_pm_finish() is not called during a
-	 * failing transition to a sleep state.
-	 */
-	acpi_target_sleep_state = ACPI_STATE_S0;
-	acpi_sleep_tts_switch(acpi_target_sleep_state);
-}
-#else /* !CONFIG_ACPI_SLEEP */
-#define acpi_target_sleep_state	ACPI_STATE_S0
-#endif /* CONFIG_ACPI_SLEEP */
-
-#ifdef CONFIG_SUSPEND
-static u32 acpi_suspend_states[] = {
-	[PM_SUSPEND_ON] = ACPI_STATE_S0,
-	[PM_SUSPEND_STANDBY] = ACPI_STATE_S1,
-	[PM_SUSPEND_MEM] = ACPI_STATE_S3,
-	[PM_SUSPEND_MAX] = ACPI_STATE_S5
-};
-
-/**
- *	acpi_suspend_begin - Set the target system sleep state to the state
- *		associated with given @pm_state, if supported.
- */
-static int acpi_suspend_begin(suspend_state_t pm_state)
-{
-	u32 acpi_state = acpi_suspend_states[pm_state];
-	int error = 0;
-
-	error = nvs_nosave ? 0 : suspend_nvs_alloc();
-	if (error)
-		return error;
-
-	if (sleep_states[acpi_state]) {
-		acpi_target_sleep_state = acpi_state;
-		acpi_sleep_tts_switch(acpi_target_sleep_state);
-	} else {
-		printk(KERN_ERR "ACPI does not support this state: %d\n",
-			pm_state);
-		error = -ENOSYS;
-	}
-	return error;
-}
-
-/**
- *	acpi_suspend_enter - Actually enter a sleep state.
- *	@pm_state: ignored
- *
- *	Flush caches and go to sleep. For STR we have to call arch-specific
- *	assembly, which in turn call acpi_enter_sleep_state().
- *	It's unfortunate, but it works. Please fix if you're feeling frisky.
- */
-static int acpi_suspend_enter(suspend_state_t pm_state)
-{
-	acpi_status status = AE_OK;
-	u32 acpi_state = acpi_target_sleep_state;
-	u8 flags = wake_sleep_flags();
-	int error;
-
-	ACPI_FLUSH_CPU_CACHE();
-
-	switch (acpi_state) {
-	case ACPI_STATE_S1:
-		barrier();
-		status = acpi_enter_sleep_state(acpi_state, flags);
-		break;
-
-	case ACPI_STATE_S3:
-		error = acpi_suspend_lowlevel();
-		if (error)
-			return error;
-		pr_info(PREFIX "Low-level resume complete\n");
-		break;
-	}
-
-	/* This violates the spec but is required for bug compatibility. */
-	acpi_write_bit_register(ACPI_BITREG_SCI_ENABLE, 1);
-
-	/* Reprogram control registers and execute _BFS */
-	acpi_leave_sleep_state_prep(acpi_state, flags);
-
-	/* ACPI 3.0 specs (P62) says that it's the responsibility
-	 * of the OSPM to clear the status bit [ implying that the
-	 * POWER_BUTTON event should not reach userspace ]
-	 */
-	if (ACPI_SUCCESS(status) && (acpi_state == ACPI_STATE_S3))
-		acpi_clear_event(ACPI_EVENT_POWER_BUTTON);
-
-	/*
-	 * Disable and clear GPE status before interrupt is enabled. Some GPEs
-	 * (like wakeup GPE) haven't handler, this can avoid such GPE misfire.
-	 * acpi_leave_sleep_state will reenable specific GPEs later
-	 */
-	acpi_disable_all_gpes();
-	/* Allow EC transactions to happen. */
-	acpi_ec_unblock_transactions_early();
-
-	suspend_nvs_restore();
-
-	return ACPI_SUCCESS(status) ? 0 : -EFAULT;
-}
-
-static int acpi_suspend_state_valid(suspend_state_t pm_state)
-{
-	u32 acpi_state;
-
-	switch (pm_state) {
-	case PM_SUSPEND_ON:
-	case PM_SUSPEND_STANDBY:
-	case PM_SUSPEND_MEM:
-		acpi_state = acpi_suspend_states[pm_state];
-
-		return sleep_states[acpi_state];
-	default:
-		return 0;
-	}
-}
-
-static const struct platform_suspend_ops acpi_suspend_ops = {
-	.valid = acpi_suspend_state_valid,
-	.begin = acpi_suspend_begin,
-	.prepare_late = acpi_pm_prepare,
-	.enter = acpi_suspend_enter,
-	.wake = acpi_pm_finish,
-	.end = acpi_pm_end,
-};
-
-/**
- *	acpi_suspend_begin_old - Set the target system sleep state to the
- *		state associated with given @pm_state, if supported, and
- *		execute the _PTS control method.  This function is used if the
- *		pre-ACPI 2.0 suspend ordering has been requested.
- */
-static int acpi_suspend_begin_old(suspend_state_t pm_state)
-{
-	int error = acpi_suspend_begin(pm_state);
-	if (!error)
-		error = __acpi_pm_prepare();
-
-	return error;
-}
-
-/*
- * The following callbacks are used if the pre-ACPI 2.0 suspend ordering has
- * been requested.
- */
-static const struct platform_suspend_ops acpi_suspend_ops_old = {
-	.valid = acpi_suspend_state_valid,
-	.begin = acpi_suspend_begin_old,
-	.prepare_late = acpi_pm_pre_suspend,
-	.enter = acpi_suspend_enter,
-	.wake = acpi_pm_finish,
-	.end = acpi_pm_end,
-	.recover = acpi_pm_finish,
-};
-
 static int __init init_old_suspend_ordering(const struct dmi_system_id *d)
 {
-	old_suspend_ordering = true;
+	acpi_old_suspend_ordering();
 	return 0;
 }
 
@@ -407,6 +182,14 @@ static struct dmi_system_id __initdata acpisleep_dmi_table[] = {
 		DMI_MATCH(DMI_BOARD_VENDOR,
 				"Matsushita Electric Industrial Co.,Ltd."),
 		DMI_MATCH(DMI_BOARD_NAME, "CF51-2L"),
+		},
+	},
+	{
+	.callback = init_nvs_nosave,
+	.ident = "Sony Vaio VGN-FW41E_H",
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Sony Corporation"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "VGN-FW41E_H"),
 		},
 	},
 	{
@@ -499,6 +282,14 @@ static struct dmi_system_id __initdata acpisleep_dmi_table[] = {
 	},
 	{
 	.callback = init_nvs_nosave,
+	.ident = "Sony Vaio VPCEB1S1E",
+	.matches = {
+		DMI_MATCH(DMI_SYS_VENDOR, "Sony Corporation"),
+		DMI_MATCH(DMI_PRODUCT_NAME, "VPCEB1S1E"),
+		},
+	},
+	{
+	.callback = init_nvs_nosave,
 	.ident = "Sony Vaio VGN-FW520F",
 	.matches = {
 		DMI_MATCH(DMI_SYS_VENDOR, "Sony Corporation"),
@@ -522,6 +313,246 @@ static struct dmi_system_id __initdata acpisleep_dmi_table[] = {
 		},
 	},
 	{},
+};
+
+static void acpi_sleep_dmi_check(void)
+{
+	dmi_check_system(acpisleep_dmi_table);
+}
+
+/**
+ * acpi_pm_freeze - Disable the GPEs and suspend EC transactions.
+ */
+static int acpi_pm_freeze(void)
+{
+	acpi_disable_all_gpes();
+	acpi_os_wait_events_complete(NULL);
+	acpi_ec_block_transactions();
+	return 0;
+}
+
+/**
+ * acpi_pre_suspend - Enable wakeup devices, "freeze" EC and save NVS.
+ */
+static int acpi_pm_pre_suspend(void)
+{
+	acpi_pm_freeze();
+	return suspend_nvs_save();
+}
+
+/**
+ *	__acpi_pm_prepare - Prepare the platform to enter the target state.
+ *
+ *	If necessary, set the firmware waking vector and do arch-specific
+ *	nastiness to get the wakeup code to the waking vector.
+ */
+static int __acpi_pm_prepare(void)
+{
+	int error = acpi_sleep_prepare(acpi_target_sleep_state);
+	if (error)
+		acpi_target_sleep_state = ACPI_STATE_S0;
+
+	return error;
+}
+
+/**
+ *	acpi_pm_prepare - Prepare the platform to enter the target sleep
+ *		state and disable the GPEs.
+ */
+static int acpi_pm_prepare(void)
+{
+	int error = __acpi_pm_prepare();
+	if (!error)
+		error = acpi_pm_pre_suspend();
+
+	return error;
+}
+
+/**
+ *	acpi_pm_finish - Instruct the platform to leave a sleep state.
+ *
+ *	This is called after we wake back up (or if entering the sleep state
+ *	failed).
+ */
+static void acpi_pm_finish(void)
+{
+	u32 acpi_state = acpi_target_sleep_state;
+
+	acpi_ec_unblock_transactions();
+	suspend_nvs_free();
+
+	if (acpi_state == ACPI_STATE_S0)
+		return;
+
+	printk(KERN_INFO PREFIX "Waking up from system sleep state S%d\n",
+		acpi_state);
+	acpi_disable_wakeup_devices(acpi_state);
+	acpi_leave_sleep_state(acpi_state);
+
+	/* reset firmware waking vector */
+	acpi_set_firmware_waking_vector((acpi_physical_address) 0);
+
+	acpi_target_sleep_state = ACPI_STATE_S0;
+}
+
+/**
+ *	acpi_pm_end - Finish up suspend sequence.
+ */
+static void acpi_pm_end(void)
+{
+	/*
+	 * This is necessary in case acpi_pm_finish() is not called during a
+	 * failing transition to a sleep state.
+	 */
+	acpi_target_sleep_state = ACPI_STATE_S0;
+	acpi_sleep_tts_switch(acpi_target_sleep_state);
+}
+#else /* !CONFIG_ACPI_SLEEP */
+#define acpi_target_sleep_state	ACPI_STATE_S0
+static inline void acpi_sleep_dmi_check(void) {}
+#endif /* CONFIG_ACPI_SLEEP */
+
+#ifdef CONFIG_SUSPEND
+static u32 acpi_suspend_states[] = {
+	[PM_SUSPEND_ON] = ACPI_STATE_S0,
+	[PM_SUSPEND_STANDBY] = ACPI_STATE_S1,
+	[PM_SUSPEND_MEM] = ACPI_STATE_S3,
+	[PM_SUSPEND_MAX] = ACPI_STATE_S5
+};
+
+/**
+ *	acpi_suspend_begin - Set the target system sleep state to the state
+ *		associated with given @pm_state, if supported.
+ */
+static int acpi_suspend_begin(suspend_state_t pm_state)
+{
+	u32 acpi_state = acpi_suspend_states[pm_state];
+	int error = 0;
+
+	error = nvs_nosave ? 0 : suspend_nvs_alloc();
+	if (error)
+		return error;
+
+	if (sleep_states[acpi_state]) {
+		acpi_target_sleep_state = acpi_state;
+		acpi_sleep_tts_switch(acpi_target_sleep_state);
+	} else {
+		printk(KERN_ERR "ACPI does not support this state: %d\n",
+			pm_state);
+		error = -ENOSYS;
+	}
+	return error;
+}
+
+/**
+ *	acpi_suspend_enter - Actually enter a sleep state.
+ *	@pm_state: ignored
+ *
+ *	Flush caches and go to sleep. For STR we have to call arch-specific
+ *	assembly, which in turn call acpi_enter_sleep_state().
+ *	It's unfortunate, but it works. Please fix if you're feeling frisky.
+ */
+static int acpi_suspend_enter(suspend_state_t pm_state)
+{
+	acpi_status status = AE_OK;
+	u32 acpi_state = acpi_target_sleep_state;
+	int error;
+
+	ACPI_FLUSH_CPU_CACHE();
+
+	switch (acpi_state) {
+	case ACPI_STATE_S1:
+		barrier();
+		status = acpi_enter_sleep_state(acpi_state, wake_sleep_flags);
+		break;
+
+	case ACPI_STATE_S3:
+		error = acpi_suspend_lowlevel();
+		if (error)
+			return error;
+		pr_info(PREFIX "Low-level resume complete\n");
+		break;
+	}
+
+	/* This violates the spec but is required for bug compatibility. */
+	acpi_write_bit_register(ACPI_BITREG_SCI_ENABLE, 1);
+
+	/* Reprogram control registers and execute _BFS */
+	acpi_leave_sleep_state_prep(acpi_state, wake_sleep_flags);
+
+	/* ACPI 3.0 specs (P62) says that it's the responsibility
+	 * of the OSPM to clear the status bit [ implying that the
+	 * POWER_BUTTON event should not reach userspace ]
+	 */
+	if (ACPI_SUCCESS(status) && (acpi_state == ACPI_STATE_S3))
+		acpi_clear_event(ACPI_EVENT_POWER_BUTTON);
+
+	/*
+	 * Disable and clear GPE status before interrupt is enabled. Some GPEs
+	 * (like wakeup GPE) haven't handler, this can avoid such GPE misfire.
+	 * acpi_leave_sleep_state will reenable specific GPEs later
+	 */
+	acpi_disable_all_gpes();
+	/* Allow EC transactions to happen. */
+	acpi_ec_unblock_transactions_early();
+
+	suspend_nvs_restore();
+
+	return ACPI_SUCCESS(status) ? 0 : -EFAULT;
+}
+
+static int acpi_suspend_state_valid(suspend_state_t pm_state)
+{
+	u32 acpi_state;
+
+	switch (pm_state) {
+	case PM_SUSPEND_ON:
+	case PM_SUSPEND_STANDBY:
+	case PM_SUSPEND_MEM:
+		acpi_state = acpi_suspend_states[pm_state];
+
+		return sleep_states[acpi_state];
+	default:
+		return 0;
+	}
+}
+
+static const struct platform_suspend_ops acpi_suspend_ops = {
+	.valid = acpi_suspend_state_valid,
+	.begin = acpi_suspend_begin,
+	.prepare_late = acpi_pm_prepare,
+	.enter = acpi_suspend_enter,
+	.wake = acpi_pm_finish,
+	.end = acpi_pm_end,
+};
+
+/**
+ *	acpi_suspend_begin_old - Set the target system sleep state to the
+ *		state associated with given @pm_state, if supported, and
+ *		execute the _PTS control method.  This function is used if the
+ *		pre-ACPI 2.0 suspend ordering has been requested.
+ */
+static int acpi_suspend_begin_old(suspend_state_t pm_state)
+{
+	int error = acpi_suspend_begin(pm_state);
+	if (!error)
+		error = __acpi_pm_prepare();
+
+	return error;
+}
+
+/*
+ * The following callbacks are used if the pre-ACPI 2.0 suspend ordering has
+ * been requested.
+ */
+static const struct platform_suspend_ops acpi_suspend_ops_old = {
+	.valid = acpi_suspend_state_valid,
+	.begin = acpi_suspend_begin_old,
+	.prepare_late = acpi_pm_pre_suspend,
+	.enter = acpi_suspend_enter,
+	.wake = acpi_pm_finish,
+	.end = acpi_pm_end,
+	.recover = acpi_pm_finish,
 };
 #endif /* CONFIG_SUSPEND */
 
@@ -550,30 +581,27 @@ static int acpi_hibernation_begin(void)
 
 static int acpi_hibernation_enter(void)
 {
-	u8 flags = wake_sleep_flags();
 	acpi_status status = AE_OK;
 
 	ACPI_FLUSH_CPU_CACHE();
 
 	/* This shouldn't return.  If it returns, we have a problem */
-	status = acpi_enter_sleep_state(ACPI_STATE_S4, flags);
+	status = acpi_enter_sleep_state(ACPI_STATE_S4, wake_sleep_flags);
 	/* Reprogram control registers and execute _BFS */
-	acpi_leave_sleep_state_prep(ACPI_STATE_S4, flags);
+	acpi_leave_sleep_state_prep(ACPI_STATE_S4, wake_sleep_flags);
 
 	return ACPI_SUCCESS(status) ? 0 : -EFAULT;
 }
 
 static void acpi_hibernation_leave(void)
 {
-	u8 flags = wake_sleep_flags();
-
 	/*
 	 * If ACPI is not enabled by the BIOS and the boot kernel, we need to
 	 * enable it here.
 	 */
 	acpi_enable();
 	/* Reprogram control registers and execute _BFS */
-	acpi_leave_sleep_state_prep(ACPI_STATE_S4, flags);
+	acpi_leave_sleep_state_prep(ACPI_STATE_S4, wake_sleep_flags);
 	/* Check the hardware signature */
 	if (facs && s4_hardware_signature != facs->hardware_signature) {
 		printk(KERN_EMERG "ACPI: Hardware changed while hibernated, "
@@ -726,8 +754,8 @@ int acpi_pm_device_sleep_state(struct device *dev, int *d_min_p)
 	 * can wake the system.  _S0W may be valid, too.
 	 */
 	if (acpi_target_sleep_state == ACPI_STATE_S0 ||
-	    (device_may_wakeup(dev) &&
-	     adev->wakeup.sleep_state <= acpi_target_sleep_state)) {
+	    (device_may_wakeup(dev) && adev->wakeup.flags.valid &&
+	     adev->wakeup.sleep_state >= acpi_target_sleep_state)) {
 		acpi_status status;
 
 		acpi_method[3] = 'W';
@@ -828,12 +856,10 @@ static void acpi_power_off_prepare(void)
 
 static void acpi_power_off(void)
 {
-	u8 flags = wake_sleep_flags();
-
 	/* acpi_sleep_prepare(ACPI_STATE_S5) should have already been called */
 	printk(KERN_DEBUG "%s called\n", __func__);
 	local_irq_disable();
-	acpi_enter_sleep_state(ACPI_STATE_S5, flags);
+	acpi_enter_sleep_state(ACPI_STATE_S5, wake_sleep_flags);
 }
 
 /*
@@ -868,12 +894,12 @@ int __init acpi_sleep_init(void)
 	u8 type_a, type_b;
 #ifdef CONFIG_SUSPEND
 	int i = 0;
-
-	dmi_check_system(acpisleep_dmi_table);
 #endif
 
 	if (acpi_disabled)
 		return 0;
+
+	acpi_sleep_dmi_check();
 
 	sleep_states[ACPI_STATE_S0] = 1;
 	printk(KERN_INFO PREFIX "(supports S0");

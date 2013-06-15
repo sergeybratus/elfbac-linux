@@ -1780,6 +1780,8 @@ static u16 ixgbe_clean_test_rings(struct ixgbe_ring *rx_ring,
 		rx_desc = IXGBE_RX_DESC(rx_ring, rx_ntc);
 	}
 
+	netdev_tx_reset_queue(txring_txq(tx_ring));
+
 	/* re-map buffers to ring, store next to clean values */
 	ixgbe_alloc_rx_buffers(rx_ring, count);
 	rx_ring->next_to_clean = rx_ntc;
@@ -2004,6 +2006,7 @@ static int ixgbe_wol_exclusion(struct ixgbe_adapter *adapter,
 		retval = 0;
 		break;
 	case IXGBE_DEV_ID_X540T:
+	case IXGBE_DEV_ID_X540T1:
 		/* check eeprom to see if enabled wol */
 		if ((wol_cap == IXGBE_DEVICE_CAPS_WOL_PORT0_1) ||
 		    ((wol_cap == IXGBE_DEVICE_CAPS_WOL_PORT0) &&

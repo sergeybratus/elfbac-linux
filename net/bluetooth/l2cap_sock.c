@@ -82,7 +82,7 @@ static int l2cap_sock_bind(struct socket *sock, struct sockaddr *addr, int alen)
 	}
 
 	if (la.l2_cid)
-		err = l2cap_add_scid(chan, la.l2_cid);
+		err = l2cap_add_scid(chan, __le16_to_cpu(la.l2_cid));
 	else
 		err = l2cap_add_psm(chan, &la.l2_bdaddr, la.l2_psm);
 
@@ -123,7 +123,8 @@ static int l2cap_sock_connect(struct socket *sock, struct sockaddr *addr, int al
 	if (la.l2_cid && la.l2_psm)
 		return -EINVAL;
 
-	err = l2cap_chan_connect(chan, la.l2_psm, la.l2_cid, &la.l2_bdaddr);
+	err = l2cap_chan_connect(chan, la.l2_psm, __le16_to_cpu(la.l2_cid),
+				&la.l2_bdaddr);
 	if (err)
 		return err;
 
@@ -241,6 +242,7 @@ static int l2cap_sock_getname(struct socket *sock, struct sockaddr *addr, int *l
 
 	BT_DBG("sock %p, sk %p", sock, sk);
 
+	memset(la, 0, sizeof(struct sockaddr_l2));
 	addr->sa_family = AF_BLUETOOTH;
 	*len = sizeof(struct sockaddr_l2);
 
@@ -586,15 +588,19 @@ static int l2cap_sock_setsockopt(struct socket *sock, int level, int optname, ch
 				break;
 			}
 
-			if (smp_conn_security(conn, sec.level))
+			if (smp_conn_security(conn->hcon, sec.level))
 				break;
 			sk->sk_state = BT_CONFIG;
 			chan->state = BT_CONFIG;
 
-		/* or for ACL link, under defer_setup time */
-		} else if (sk->sk_state == BT_CONNECT2 &&
-					bt_sk(sk)->defer_setup) {
-			err = l2cap_chan_check_security(chan);
+		/* or for ACL link */
+		} else if ((sk->sk_state == BT_CONNECT2 &&
+			   bt_sk(sk)->defer_setup) ||
+			   sk->sk_state == BT_CONNECTED) {
+			if (!l2cap_chan_check_security(chan))
+				bt_sk(sk)->suspended = true;
+			else
+				sk->sk_state_change(sk);
 		} else {
 			err = -EINVAL;
 		}

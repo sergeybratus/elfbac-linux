@@ -744,21 +744,6 @@ struct bnx2x_fastpath {
 
 #define ETH_RX_ERROR_FALGS		ETH_FAST_PATH_RX_CQE_PHY_DECODE_ERR_FLG
 
-#define BNX2X_IP_CSUM_ERR(cqe) \
-			(!((cqe)->fast_path_cqe.status_flags & \
-			   ETH_FAST_PATH_RX_CQE_IP_XSUM_NO_VALIDATION_FLG) && \
-			 ((cqe)->fast_path_cqe.type_error_flags & \
-			  ETH_FAST_PATH_RX_CQE_IP_BAD_XSUM_FLG))
-
-#define BNX2X_L4_CSUM_ERR(cqe) \
-			(!((cqe)->fast_path_cqe.status_flags & \
-			   ETH_FAST_PATH_RX_CQE_L4_XSUM_NO_VALIDATION_FLG) && \
-			 ((cqe)->fast_path_cqe.type_error_flags & \
-			  ETH_FAST_PATH_RX_CQE_L4_BAD_XSUM_FLG))
-
-#define BNX2X_RX_CSUM_OK(cqe) \
-			(!(BNX2X_L4_CSUM_ERR(cqe) || BNX2X_IP_CSUM_ERR(cqe)))
-
 #define BNX2X_PRS_FLAG_OVERETH_IPV4(flags) \
 				(((le16_to_cpu(flags) & \
 				   PARSING_FLAGS_OVER_ETHERNET_PROTOCOL) >> \
@@ -1172,6 +1157,13 @@ enum {
 	BNX2X_SP_RTNL_FAN_FAILURE,
 };
 
+
+struct bnx2x_prev_path_list {
+	u8 bus;
+	u8 slot;
+	u8 path;
+	struct list_head list;
+};
 
 struct bnx2x {
 	/* Fields used in the tx and intr/napi performance paths

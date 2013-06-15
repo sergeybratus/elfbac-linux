@@ -486,6 +486,8 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 		/* free all potentially still buffered bcast frames */
 		local->total_ps_buffered -= skb_queue_len(&sdata->u.ap.ps_bc_buf);
 		skb_queue_purge(&sdata->u.ap.ps_bc_buf);
+	} else if (sdata->vif.type == NL80211_IFTYPE_STATION) {
+		ieee80211_mgd_stop(sdata);
 	}
 
 	if (going_down)
@@ -512,6 +514,18 @@ static void ieee80211_do_stop(struct ieee80211_sub_if_data *sdata,
 		ieee80211_configure_filter(local);
 		break;
 	default:
+		mutex_lock(&local->mtx);
+		if (local->hw_roc_dev == sdata->dev &&
+		    local->hw_roc_channel) {
+			/* ignore return value since this is racy */
+			drv_cancel_remain_on_channel(local);
+			ieee80211_queue_work(&local->hw, &local->hw_roc_done);
+		}
+		mutex_unlock(&local->mtx);
+
+		flush_work(&local->hw_roc_start);
+		flush_work(&local->hw_roc_done);
+
 		flush_work(&sdata->work);
 		/*
 		 * When we get here, the interface is marked down.
@@ -644,8 +658,6 @@ static void ieee80211_teardown_sdata(struct net_device *dev)
 
 	if (ieee80211_vif_is_mesh(&sdata->vif))
 		mesh_rmc_free(sdata);
-	else if (sdata->vif.type == NL80211_IFTYPE_STATION)
-		ieee80211_mgd_teardown(sdata);
 
 	flushed = sta_info_flush(local, sdata);
 	WARN_ON(flushed);
@@ -1244,6 +1256,15 @@ void ieee80211_remove_interfaces(struct ieee80211_local *local)
 	LIST_HEAD(unreg_list);
 
 	ASSERT_RTNL();
+
+	/*
+	 * Close all AP_VLAN interfaces first, as otherwise they
+	 * might be closed while the AP interface they belong to
+	 * is closed, causing unregister_netdevice_many() to crash.
+	 */
+	list_for_each_entry(sdata, &local->interfaces, list)
+		if (sdata->vif.type == NL80211_IFTYPE_AP_VLAN)
+			dev_close(sdata->dev);
 
 	mutex_lock(&local->iflist_mtx);
 	list_for_each_entry_safe(sdata, tmp, &local->interfaces, list) {

@@ -24,6 +24,7 @@
 #include <linux/if_arp.h>
 #include <linux/if_tun.h>
 #include <linux/if_macvlan.h>
+#include <linux/if_vlan.h>
 
 #include <net/sock.h>
 
@@ -234,11 +235,12 @@ static void handle_tx(struct vhost_net *net)
 				msg.msg_controllen = 0;
 				ubufs = NULL;
 			} else {
-				struct ubuf_info *ubuf = &vq->ubuf_info[head];
+				struct ubuf_info *ubuf;
+				ubuf = vq->ubuf_info + vq->upend_idx;
 
 				vq->heads[vq->upend_idx].len = len;
 				ubuf->callback = vhost_zerocopy_callback;
-				ubuf->arg = vq->ubufs;
+				ubuf->ctx = vq->ubufs;
 				ubuf->desc = vq->upend_idx;
 				msg.msg_control = ubuf;
 				msg.msg_controllen = sizeof(ubuf);
@@ -283,8 +285,12 @@ static int peek_head_len(struct sock *sk)
 
 	spin_lock_irqsave(&sk->sk_receive_queue.lock, flags);
 	head = skb_peek(&sk->sk_receive_queue);
-	if (likely(head))
+	if (likely(head)) {
 		len = head->len;
+		if (vlan_tx_tag_present(head))
+			len += VLAN_HLEN;
+	}
+
 	spin_unlock_irqrestore(&sk->sk_receive_queue.lock, flags);
 	return len;
 }
@@ -371,7 +377,8 @@ static void handle_rx(struct vhost_net *net)
 		.hdr.gso_type = VIRTIO_NET_HDR_GSO_NONE
 	};
 	size_t total_len = 0;
-	int err, headcount, mergeable;
+	int err, mergeable;
+	s16 headcount;
 	size_t vhost_hlen, sock_hlen;
 	size_t vhost_len, sock_len;
 	/* TODO: check that we are running from vhost_worker? */

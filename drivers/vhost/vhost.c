@@ -1074,7 +1074,7 @@ static int translate_desc(struct vhost_dev *dev, u64 addr, u32 len,
 		}
 		_iov = iov + ret;
 		size = reg->memory_size - addr + reg->guest_phys_addr;
-		_iov->iov_len = min((u64)len, size);
+		_iov->iov_len = min((u64)len - s, size);
 		_iov->iov_base = (void __user *)(unsigned long)
 			(reg->userspace_addr + addr - reg->guest_phys_addr);
 		s += size;
@@ -1598,10 +1598,9 @@ void vhost_ubuf_put_and_wait(struct vhost_ubuf_ref *ubufs)
 	kfree(ubufs);
 }
 
-void vhost_zerocopy_callback(void *arg)
+void vhost_zerocopy_callback(struct ubuf_info *ubuf)
 {
-	struct ubuf_info *ubuf = arg;
-	struct vhost_ubuf_ref *ubufs = ubuf->arg;
+	struct vhost_ubuf_ref *ubufs = ubuf->ctx;
 	struct vhost_virtqueue *vq = ubufs->vq;
 
 	/* set len = 1 to mark this desc buffers done DMA */

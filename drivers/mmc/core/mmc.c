@@ -385,13 +385,13 @@ static int mmc_read_ext_csd(struct mmc_card *card, u8 *ext_csd)
 		ext_csd[EXT_CSD_SEC_FEATURE_SUPPORT];
 	card->ext_csd.raw_trim_mult =
 		ext_csd[EXT_CSD_TRIM_MULT];
+	card->ext_csd.raw_partition_support = ext_csd[EXT_CSD_PARTITION_SUPPORT];
 	if (card->ext_csd.rev >= 4) {
 		/*
 		 * Enhanced area feature support -- check whether the eMMC
 		 * card has the Enhanced area enabled.  If so, export enhanced
 		 * area offset and size to user by adding sysfs interface.
 		 */
-		card->ext_csd.raw_partition_support = ext_csd[EXT_CSD_PARTITION_SUPPORT];
 		if ((ext_csd[EXT_CSD_PARTITION_SUPPORT] & 0x2) &&
 		    (ext_csd[EXT_CSD_PARTITION_ATTRIBUTE] & 0x1)) {
 			hc_erase_grp_sz =
@@ -695,6 +695,11 @@ static int mmc_select_powerclass(struct mmc_card *card,
 		else if (host->ios.clock <= 200000000)
 			index = EXT_CSD_PWR_CL_200_195;
 		break;
+	case MMC_VDD_27_28:
+	case MMC_VDD_28_29:
+	case MMC_VDD_29_30:
+	case MMC_VDD_30_31:
+	case MMC_VDD_31_32:
 	case MMC_VDD_32_33:
 	case MMC_VDD_33_34:
 	case MMC_VDD_34_35:
@@ -1111,11 +1116,10 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 		ext_csd_bits = (bus_width == MMC_BUS_WIDTH_8) ?
 				EXT_CSD_BUS_WIDTH_8 : EXT_CSD_BUS_WIDTH_4;
 		err = mmc_select_powerclass(card, ext_csd_bits, ext_csd);
-		if (err) {
-			pr_err("%s: power class selection to bus width %d failed\n",
-				mmc_hostname(card->host), 1 << bus_width);
-			goto err;
-		}
+		if (err)
+			pr_warning("%s: power class selection to bus width %d"
+				   " failed\n", mmc_hostname(card->host),
+				   1 << bus_width);
 	}
 
 	/*
@@ -1147,10 +1151,10 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			err = mmc_select_powerclass(card, ext_csd_bits[idx][0],
 						    ext_csd);
 			if (err)
-				pr_err("%s: power class selection to "
-				       "bus width %d failed\n",
-				       mmc_hostname(card->host),
-				       1 << bus_width);
+				pr_warning("%s: power class selection to "
+					   "bus width %d failed\n",
+					   mmc_hostname(card->host),
+					   1 << bus_width);
 
 			err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 					 EXT_CSD_BUS_WIDTH,
@@ -1178,10 +1182,10 @@ static int mmc_init_card(struct mmc_host *host, u32 ocr,
 			err = mmc_select_powerclass(card, ext_csd_bits[idx][1],
 						    ext_csd);
 			if (err)
-				pr_err("%s: power class selection to "
-				       "bus width %d ddr %d failed\n",
-				       mmc_hostname(card->host),
-				       1 << bus_width, ddr);
+				pr_warning("%s: power class selection to "
+					   "bus width %d ddr %d failed\n",
+					   mmc_hostname(card->host),
+					   1 << bus_width, ddr);
 
 			err = mmc_switch(card, EXT_CSD_CMD_SET_NORMAL,
 					 EXT_CSD_BUS_WIDTH,

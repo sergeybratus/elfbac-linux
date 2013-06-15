@@ -168,6 +168,7 @@ static void destroy_serial(struct kref *kref)
 		}
 	}
 
+	usb_put_intf(serial->interface);
 	usb_put_dev(serial->dev);
 	kfree(serial);
 }
@@ -625,7 +626,7 @@ static struct usb_serial *create_serial(struct usb_device *dev,
 	}
 	serial->dev = usb_get_dev(dev);
 	serial->type = driver;
-	serial->interface = interface;
+	serial->interface = usb_get_intf(interface);
 	kref_init(&serial->kref);
 	mutex_init(&serial->disc_mutex);
 	serial->minor = SERIAL_TTY_NO_MINOR;
@@ -670,12 +671,14 @@ exit:
 static struct usb_serial_driver *search_serial_device(
 					struct usb_interface *iface)
 {
-	const struct usb_device_id *id;
+	const struct usb_device_id *id = NULL;
 	struct usb_serial_driver *drv;
+	struct usb_driver *driver = to_usb_driver(iface->dev.driver);
 
 	/* Check if the usb id matches a known device */
 	list_for_each_entry(drv, &usb_serial_driver_list, driver_list) {
-		id = get_iface_id(drv, iface);
+		if (drv->usb_driver == driver)
+			id = get_iface_id(drv, iface);
 		if (id)
 			return drv;
 	}
@@ -697,10 +700,20 @@ static int serial_carrier_raised(struct tty_port *port)
 static void serial_dtr_rts(struct tty_port *port, int on)
 {
 	struct usb_serial_port *p = container_of(port, struct usb_serial_port, port);
-	struct usb_serial_driver *drv = p->serial->type;
+	struct usb_serial *serial = p->serial;
+	struct usb_serial_driver *drv = serial->type;
 
-	if (drv->dtr_rts)
+	if (!drv->dtr_rts)
+		return;
+	/*
+	 * Work-around bug in the tty-layer which can result in dtr_rts
+	 * being called after a disconnect (and tty_unregister_device
+	 * has returned). Remove once bug has been squashed.
+	 */
+	mutex_lock(&serial->disc_mutex);
+	if (!serial->disconnected)
 		drv->dtr_rts(p, on);
+	mutex_unlock(&serial->disc_mutex);
 }
 
 static const struct tty_port_operations serial_port_ops = {
@@ -766,7 +779,7 @@ int usb_serial_probe(struct usb_interface *interface,
 
 		if (retval) {
 			dbg("sub driver rejected device");
-			kfree(serial);
+			usb_serial_put(serial);
 			module_put(type->driver.owner);
 			return retval;
 		}
@@ -838,7 +851,7 @@ int usb_serial_probe(struct usb_interface *interface,
 		 */
 		if (num_bulk_in == 0 || num_bulk_out == 0) {
 			dev_info(&interface->dev, "PL-2303 hack: descriptors matched but endpoints did not\n");
-			kfree(serial);
+			usb_serial_put(serial);
 			module_put(type->driver.owner);
 			return -ENODEV;
 		}
@@ -852,7 +865,7 @@ int usb_serial_probe(struct usb_interface *interface,
 		if (num_ports == 0) {
 			dev_err(&interface->dev,
 			    "Generic device with no bulk out, not allowed.\n");
-			kfree(serial);
+			usb_serial_put(serial);
 			module_put(type->driver.owner);
 			return -EIO;
 		}
@@ -1059,6 +1072,12 @@ int usb_serial_probe(struct usb_interface *interface,
 		serial->attached = 1;
 	}
 
+	/* Avoid race with tty_open and serial_install by setting the
+	 * disconnected flag and not clearing it until all ports have been
+	 * registered.
+	 */
+	serial->disconnected = 1;
+
 	if (get_free_serial(serial, num_ports, &minor) == NULL) {
 		dev_err(&interface->dev, "No more free serial devices\n");
 		goto probe_error;
@@ -1070,18 +1089,15 @@ int usb_serial_probe(struct usb_interface *interface,
 		port = serial->port[i];
 		dev_set_name(&port->dev, "ttyUSB%d", port->number);
 		dbg ("%s - registering %s", __func__, dev_name(&port->dev));
-		port->dev_state = PORT_REGISTERING;
 		device_enable_async_suspend(&port->dev);
 
 		retval = device_add(&port->dev);
-		if (retval) {
+		if (retval)
 			dev_err(&port->dev, "Error registering port device, "
 				"continuing\n");
-			port->dev_state = PORT_UNREGISTERED;
-		} else {
-			port->dev_state = PORT_REGISTERED;
-		}
 	}
+
+	serial->disconnected = 0;
 
 	usb_serial_console_init(debug, minor);
 
@@ -1124,22 +1140,8 @@ void usb_serial_disconnect(struct usb_interface *interface)
 			}
 			kill_traffic(port);
 			cancel_work_sync(&port->work);
-			if (port->dev_state == PORT_REGISTERED) {
-
-				/* Make sure the port is bound so that the
-				 * driver's port_remove method is called.
-				 */
-				if (!port->dev.driver) {
-					int rc;
-
-					port->dev.driver =
-							&serial->type->driver;
-					rc = device_bind_driver(&port->dev);
-				}
-				port->dev_state = PORT_UNREGISTERING;
+			if (device_is_registered(&port->dev))
 				device_del(&port->dev);
-				port->dev_state = PORT_UNREGISTERED;
-			}
 		}
 	}
 	serial->type->disconnect(serial);
@@ -1349,7 +1351,6 @@ static int usb_serial_register(struct usb_serial_driver *driver)
 				driver->description);
 		return -EINVAL;
 	}
-	driver->usb_driver->supports_autosuspend = 1;
 
 	/* Add this device to our list of devices */
 	mutex_lock(&table_lock);
@@ -1384,7 +1385,7 @@ static void usb_serial_deregister(struct usb_serial_driver *device)
  * @serial_drivers: NULL-terminated array of pointers to drivers to be registered
  *
  * Registers @udriver and all the drivers in the @serial_drivers array.
- * Automatically fills in the .no_dynamic_id field in @udriver and
+ * Automatically fills in the .no_dynamic_id and PM fields in @udriver and
  * the .usb_driver field in each serial driver.
  */
 int usb_serial_register_drivers(struct usb_driver *udriver,
@@ -1403,11 +1404,17 @@ int usb_serial_register_drivers(struct usb_driver *udriver,
 	 * the serial drivers are registered, because the probe would
 	 * simply fail for lack of a matching serial driver.
 	 * Therefore save off udriver's id_table until we are all set.
+	 *
+	 * Suspend/resume support is implemented in the usb-serial core,
+	 * so fill in the PM-related fields in udriver.
 	 */
 	saved_id_table = udriver->id_table;
 	udriver->id_table = NULL;
 
 	udriver->no_dynamic_id = 1;
+	udriver->supports_autosuspend = 1;
+	udriver->suspend = usb_serial_suspend;
+	udriver->resume = usb_serial_resume;
 	rc = usb_register(udriver);
 	if (rc)
 		return rc;

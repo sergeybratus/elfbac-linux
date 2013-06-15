@@ -141,18 +141,29 @@ int proc_nr_dentry(ctl_table *table, int write, void __user *buffer,
  * Compare 2 name strings, return 0 if they match, otherwise non-zero.
  * The strings are both count bytes long, and count is non-zero.
  */
+#ifdef CONFIG_DCACHE_WORD_ACCESS
+
+#include <asm/word-at-a-time.h>
+/*
+ * NOTE! 'cs' and 'scount' come from a dentry, so it has a
+ * aligned allocation for this particular component. We don't
+ * strictly need the load_unaligned_zeropad() safety, but it
+ * doesn't hurt either.
+ *
+ * In contrast, 'ct' and 'tcount' can be from a pathname, and do
+ * need the careful unaligned handling.
+ */
 static inline int dentry_cmp(const unsigned char *cs, size_t scount,
 				const unsigned char *ct, size_t tcount)
 {
-#ifdef CONFIG_DCACHE_WORD_ACCESS
 	unsigned long a,b,mask;
 
 	if (unlikely(scount != tcount))
 		return 1;
 
 	for (;;) {
-		a = *(unsigned long *)cs;
-		b = *(unsigned long *)ct;
+		a = load_unaligned_zeropad(cs);
+		b = load_unaligned_zeropad(ct);
 		if (tcount < sizeof(unsigned long))
 			break;
 		if (unlikely(a != b))
@@ -165,7 +176,13 @@ static inline int dentry_cmp(const unsigned char *cs, size_t scount,
 	}
 	mask = ~(~0ul << tcount*8);
 	return unlikely(!!((a ^ b) & mask));
+}
+
 #else
+
+static inline int dentry_cmp(const unsigned char *cs, size_t scount,
+				const unsigned char *ct, size_t tcount)
+{
 	if (scount != tcount)
 		return 1;
 
@@ -177,8 +194,9 @@ static inline int dentry_cmp(const unsigned char *cs, size_t scount,
 		tcount--;
 	} while (tcount);
 	return 0;
-#endif
 }
+
+#endif
 
 static void __d_free(struct rcu_head *head)
 {
@@ -355,7 +373,7 @@ static struct dentry *d_kill(struct dentry *dentry, struct dentry *parent)
 	 * Inform try_to_ascend() that we are no longer attached to the
 	 * dentry tree
 	 */
-	dentry->d_flags |= DCACHE_DISCONNECTED;
+	dentry->d_flags |= DCACHE_DENTRY_KILLED;
 	if (parent)
 		spin_unlock(&parent->d_lock);
 	dentry_iput(dentry);
@@ -1012,7 +1030,7 @@ static struct dentry *try_to_ascend(struct dentry *old, int locked, unsigned seq
 	 * or deletion
 	 */
 	if (new != old->d_parent ||
-		 (old->d_flags & DCACHE_DISCONNECTED) ||
+		 (old->d_flags & DCACHE_DENTRY_KILLED) ||
 		 (!locked && read_seqretry(&rename_lock, seq))) {
 		spin_unlock(&new->d_lock);
 		new = NULL;
@@ -1098,6 +1116,8 @@ positive:
 	return 1;
 
 rename_retry:
+	if (locked)
+		goto again;
 	locked = 1;
 	write_seqlock(&rename_lock);
 	goto again;
@@ -1200,6 +1220,8 @@ out:
 rename_retry:
 	if (found)
 		return found;
+	if (locked)
+		goto again;
 	locked = 1;
 	write_seqlock(&rename_lock);
 	goto again;
@@ -1216,8 +1238,10 @@ void shrink_dcache_parent(struct dentry * parent)
 	LIST_HEAD(dispose);
 	int found;
 
-	while ((found = select_parent(parent, &dispose)) != 0)
+	while ((found = select_parent(parent, &dispose)) != 0) {
 		shrink_dentry_list(&dispose);
+		cond_resched();
+	}
 }
 EXPORT_SYMBOL(shrink_dcache_parent);
 
@@ -2945,6 +2969,8 @@ resume:
 	return;
 
 rename_retry:
+	if (locked)
+		goto again;
 	locked = 1;
 	write_seqlock(&rename_lock);
 	goto again;

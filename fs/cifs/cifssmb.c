@@ -89,6 +89,32 @@ static struct {
 /* Forward declarations */
 static void cifs_readv_complete(struct work_struct *work);
 
+#ifdef CONFIG_HIGHMEM
+/*
+ * On arches that have high memory, kmap address space is limited. By
+ * serializing the kmap operations on those arches, we ensure that we don't
+ * end up with a bunch of threads in writeback with partially mapped page
+ * arrays, stuck waiting for kmap to come back. That situation prevents
+ * progress and can deadlock.
+ */
+static DEFINE_MUTEX(cifs_kmap_mutex);
+
+static inline void
+cifs_kmap_lock(void)
+{
+	mutex_lock(&cifs_kmap_mutex);
+}
+
+static inline void
+cifs_kmap_unlock(void)
+{
+	mutex_unlock(&cifs_kmap_mutex);
+}
+#else /* !CONFIG_HIGHMEM */
+#define cifs_kmap_lock() do { ; } while(0)
+#define cifs_kmap_unlock() do { ; } while(0)
+#endif /* CONFIG_HIGHMEM */
+
 /* Mark as invalid, all open files on tree connections since they
    were closed when session to server was lost */
 static void mark_open_files_invalid(struct cifs_tcon *pTcon)
@@ -1557,6 +1583,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 	eof_index = eof ? (eof - 1) >> PAGE_CACHE_SHIFT : 0;
 	cFYI(1, "eof=%llu eof_index=%lu", eof, eof_index);
 
+	cifs_kmap_lock();
 	list_for_each_entry_safe(page, tpage, &rdata->pages, lru) {
 		if (remaining >= PAGE_CACHE_SIZE) {
 			/* enough data to fill the page */
@@ -1606,6 +1633,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 			page_cache_release(page);
 		}
 	}
+	cifs_kmap_unlock();
 
 	/* issue the read if we have any iovecs left to fill */
 	if (rdata->nr_iov > 1) {
@@ -2194,7 +2222,9 @@ cifs_async_writev(struct cifs_writedata *wdata)
 	 * and set the iov_len properly for each one. It may also set
 	 * wdata->bytes too.
 	 */
+	cifs_kmap_lock();
 	wdata->marshal_iov(iov, wdata);
+	cifs_kmap_unlock();
 
 	cFYI(1, "async write at %llu %u bytes", wdata->offset, wdata->bytes);
 
@@ -3892,13 +3922,12 @@ CIFSSMBSetCIFSACL(const int xid, struct cifs_tcon *tcon, __u16 fid,
 	int rc = 0;
 	int bytes_returned = 0;
 	SET_SEC_DESC_REQ *pSMB = NULL;
-	NTRANSACT_RSP *pSMBr = NULL;
+	void *pSMBr;
 
 setCifsAclRetry:
-	rc = smb_init(SMB_COM_NT_TRANSACT, 19, tcon, (void **) &pSMB,
-			(void **) &pSMBr);
+	rc = smb_init(SMB_COM_NT_TRANSACT, 19, tcon, (void **) &pSMB, &pSMBr);
 	if (rc)
-			return (rc);
+		return rc;
 
 	pSMB->MaxSetupCount = 0;
 	pSMB->Reserved = 0;
@@ -3926,9 +3955,8 @@ setCifsAclRetry:
 	pSMB->AclFlags = cpu_to_le32(aclflag);
 
 	if (pntsd && acllen) {
-		memcpy((char *) &pSMBr->hdr.Protocol + data_offset,
-			(char *) pntsd,
-			acllen);
+		memcpy((char *)pSMBr + offsetof(struct smb_hdr, Protocol) +
+				data_offset, pntsd, acllen);
 		inc_rfc1001_len(pSMB, byte_count + data_count);
 	} else
 		inc_rfc1001_len(pSMB, byte_count);
@@ -4346,7 +4374,7 @@ int
 CIFSFindFirst(const int xid, struct cifs_tcon *tcon,
 	      const char *searchName,
 	      const struct nls_table *nls_codepage,
-	      __u16 *pnetfid,
+	      __u16 *pnetfid, __u16 search_flags,
 	      struct cifs_search_info *psrch_inf, int remap, const char dirsep)
 {
 /* level 257 SMB_ */
@@ -4418,8 +4446,7 @@ findFirstRetry:
 	    cpu_to_le16(ATTR_READONLY | ATTR_HIDDEN | ATTR_SYSTEM |
 			ATTR_DIRECTORY);
 	pSMB->SearchCount = cpu_to_le16(CIFSMaxBufSize/sizeof(FILE_UNIX_INFO));
-	pSMB->SearchFlags = cpu_to_le16(CIFS_SEARCH_CLOSE_AT_END |
-		CIFS_SEARCH_RETURN_RESUME);
+	pSMB->SearchFlags = cpu_to_le16(search_flags);
 	pSMB->InformationLevel = cpu_to_le16(psrch_inf->info_level);
 
 	/* BB what should we set StorageType to? Does it matter? BB */
@@ -4489,8 +4516,8 @@ findFirstRetry:
 	return rc;
 }
 
-int CIFSFindNext(const int xid, struct cifs_tcon *tcon,
-		 __u16 searchHandle, struct cifs_search_info *psrch_inf)
+int CIFSFindNext(const int xid, struct cifs_tcon *tcon, __u16 searchHandle,
+		 __u16 search_flags, struct cifs_search_info *psrch_inf)
 {
 	TRANSACTION2_FNEXT_REQ *pSMB = NULL;
 	TRANSACTION2_FNEXT_RSP *pSMBr = NULL;
@@ -4533,8 +4560,7 @@ int CIFSFindNext(const int xid, struct cifs_tcon *tcon,
 		cpu_to_le16(CIFSMaxBufSize / sizeof(FILE_UNIX_INFO));
 	pSMB->InformationLevel = cpu_to_le16(psrch_inf->info_level);
 	pSMB->ResumeKey = psrch_inf->resume_key;
-	pSMB->SearchFlags =
-	      cpu_to_le16(CIFS_SEARCH_CLOSE_AT_END | CIFS_SEARCH_RETURN_RESUME);
+	pSMB->SearchFlags = cpu_to_le16(search_flags);
 
 	name_len = psrch_inf->resume_name_len;
 	params += name_len;
@@ -4846,8 +4872,12 @@ parse_DFS_referrals(TRANSACTION2_GET_DFS_REFER_RSP *pSMBr,
 		max_len = data_end - temp;
 		node->node_name = cifs_strndup_from_utf16(temp, max_len,
 						is_unicode, nls_codepage);
-		if (!node->node_name)
+		if (!node->node_name) {
 			rc = -ENOMEM;
+			goto parse_DFS_referrals_exit;
+		}
+
+		ref++;
 	}
 
 parse_DFS_referrals_exit:
@@ -5708,7 +5738,8 @@ CIFSSMBSetFileInfo(const int xid, struct cifs_tcon *tcon,
 	param_offset = offsetof(struct smb_com_transaction2_sfi_req, Fid) - 4;
 	offset = param_offset + params;
 
-	data_offset = (char *) (&pSMB->hdr.Protocol) + offset;
+	data_offset = (char *)pSMB +
+			offsetof(struct smb_hdr, Protocol) + offset;
 
 	count = sizeof(FILE_BASIC_INFO);
 	pSMB->MaxParameterCount = cpu_to_le16(2);
@@ -5977,7 +6008,7 @@ CIFSSMBUnixSetFileInfo(const int xid, struct cifs_tcon *tcon,
 		       u16 fid, u32 pid_of_opener)
 {
 	struct smb_com_transaction2_sfi_req *pSMB  = NULL;
-	FILE_UNIX_BASIC_INFO *data_offset;
+	char *data_offset;
 	int rc = 0;
 	u16 params, param_offset, offset, byte_count, count;
 
@@ -5999,8 +6030,9 @@ CIFSSMBUnixSetFileInfo(const int xid, struct cifs_tcon *tcon,
 	param_offset = offsetof(struct smb_com_transaction2_sfi_req, Fid) - 4;
 	offset = param_offset + params;
 
-	data_offset = (FILE_UNIX_BASIC_INFO *)
-				((char *)(&pSMB->hdr.Protocol) + offset);
+	data_offset = (char *)pSMB +
+			offsetof(struct smb_hdr, Protocol) + offset;
+
 	count = sizeof(FILE_UNIX_BASIC_INFO);
 
 	pSMB->MaxParameterCount = cpu_to_le16(2);
@@ -6022,7 +6054,7 @@ CIFSSMBUnixSetFileInfo(const int xid, struct cifs_tcon *tcon,
 	inc_rfc1001_len(pSMB, byte_count);
 	pSMB->ByteCount = cpu_to_le16(byte_count);
 
-	cifs_fill_unix_set_info(data_offset, args);
+	cifs_fill_unix_set_info((FILE_UNIX_BASIC_INFO *)data_offset, args);
 
 	rc = SendReceiveNoRsp(xid, tcon->ses, (char *) pSMB, 0);
 	if (rc)

@@ -79,7 +79,7 @@ struct extent_io_ops {
 					u64 start, u64 end,
 				       struct extent_state *state);
 	int (*readpage_end_io_hook)(struct page *page, u64 start, u64 end,
-				    struct extent_state *state);
+				    struct extent_state *state, int mirror);
 	int (*writepage_end_io_hook)(struct page *page, u64 start, u64 end,
 				      struct extent_state *state, int uptodate);
 	void (*set_bit_hook)(struct inode *inode, struct extent_state *state,
@@ -135,7 +135,7 @@ struct extent_buffer {
 	spinlock_t refs_lock;
 	atomic_t refs;
 	atomic_t io_pages;
-	int failed_mirror;
+	int read_mirror;
 	struct list_head leak_list;
 	struct rcu_head rcu_head;
 	pid_t lock_owner;
@@ -312,6 +312,8 @@ int map_private_extent_buffer(struct extent_buffer *eb, unsigned long offset,
 		      unsigned long *map_len);
 int extent_range_uptodate(struct extent_io_tree *tree,
 			  u64 start, u64 end);
+int extent_range_clear_dirty_for_io(struct inode *inode, u64 start, u64 end);
+int extent_range_redirty_for_io(struct inode *inode, u64 start, u64 end);
 int extent_clear_unlock_delalloc(struct inode *inode,
 				struct extent_io_tree *tree,
 				u64 start, u64 end, struct page *locked_page,

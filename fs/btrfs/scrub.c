@@ -383,7 +383,6 @@ static void scrub_print_warning(const char *errstr, struct scrub_block *sblock)
 	eb = path->nodes[0];
 	ei = btrfs_item_ptr(eb, path->slots[0], struct btrfs_extent_item);
 	item_size = btrfs_item_size_nr(eb, path->slots[0]);
-	btrfs_release_path(path);
 
 	if (ret & BTRFS_EXTENT_FLAG_TREE_BLOCK) {
 		do {
@@ -398,7 +397,9 @@ static void scrub_print_warning(const char *errstr, struct scrub_block *sblock)
 				ret < 0 ? -1 : ref_level,
 				ret < 0 ? -1 : ref_root);
 		} while (ret != 1);
+		btrfs_release_path(path);
 	} else {
+		btrfs_release_path(path);
 		swarn.path = path;
 		iterate_extent_inodes(fs_info, found_key.objectid,
 					extent_item_pos, 1,
@@ -998,6 +999,7 @@ static int scrub_setup_recheck_block(struct scrub_dev *sdev,
 			page = sblock->pagev + page_index;
 			page->logical = logical;
 			page->physical = bbio->stripes[mirror_index].physical;
+			/* for missing devices, bdev is NULL */
 			page->bdev = bbio->stripes[mirror_index].dev->bdev;
 			page->mirror_num = mirror_index + 1;
 			page->page = alloc_page(GFP_NOFS);
@@ -1042,8 +1044,16 @@ static int scrub_recheck_block(struct btrfs_fs_info *fs_info,
 		struct scrub_page *page = sblock->pagev + page_num;
 		DECLARE_COMPLETION_ONSTACK(complete);
 
+		if (page->bdev == NULL) {
+			page->io_error = 1;
+			sblock->no_io_error_seen = 0;
+			continue;
+		}
+
 		BUG_ON(!page->page);
 		bio = bio_alloc(GFP_NOFS, 1);
+		if (!bio)
+			return -EIO;
 		bio->bi_bdev = page->bdev;
 		bio->bi_sector = page->physical >> 9;
 		bio->bi_end_io = scrub_complete_bio_end_io;
@@ -1171,6 +1181,8 @@ static int scrub_repair_page_from_good_copy(struct scrub_block *sblock_bad,
 		DECLARE_COMPLETION_ONSTACK(complete);
 
 		bio = bio_alloc(GFP_NOFS, 1);
+		if (!bio)
+			return -EIO;
 		bio->bi_bdev = page_bad->bdev;
 		bio->bi_sector = page_bad->physical >> 9;
 		bio->bi_end_io = scrub_complete_bio_end_io;
@@ -1253,12 +1265,6 @@ static int scrub_checksum_data(struct scrub_block *sblock)
 	if (memcmp(csum, on_disk_csum, sdev->csum_size))
 		fail = 1;
 
-	if (fail) {
-		spin_lock(&sdev->stat_lock);
-		++sdev->stat.csum_errors;
-		spin_unlock(&sdev->stat_lock);
-	}
-
 	return fail;
 }
 
@@ -1330,15 +1336,6 @@ static int scrub_checksum_tree_block(struct scrub_block *sblock)
 	btrfs_csum_final(crc, calculated_csum);
 	if (memcmp(calculated_csum, on_disk_csum, sdev->csum_size))
 		++crc_fail;
-
-	if (crc_fail || fail) {
-		spin_lock(&sdev->stat_lock);
-		if (crc_fail)
-			++sdev->stat.csum_errors;
-		if (fail)
-			++sdev->stat.verify_errors;
-		spin_unlock(&sdev->stat_lock);
-	}
 
 	return fail || crc_fail;
 }

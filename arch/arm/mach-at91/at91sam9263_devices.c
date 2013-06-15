@@ -72,7 +72,8 @@ void __init at91_add_device_usbh(struct at91_usbh_data *data)
 	/* Enable VBus control for UHP ports */
 	for (i = 0; i < data->ports; i++) {
 		if (gpio_is_valid(data->vbus_pin[i]))
-			at91_set_gpio_output(data->vbus_pin[i], 0);
+			at91_set_gpio_output(data->vbus_pin[i],
+					     data->vbus_pin_active_low[i]);
 	}
 
 	/* Enable overcurrent notification */
@@ -541,7 +542,7 @@ static struct i2c_gpio_platform_data pdata = {
 
 static struct platform_device at91sam9263_twi_device = {
 	.name			= "i2c-gpio",
-	.id			= -1,
+	.id			= 0,
 	.dev.platform_data	= &pdata,
 };
 
@@ -670,6 +671,9 @@ void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
 			cs_pin = spi0_standard_cs[devices[i].chip_select];
 		else
 			cs_pin = spi1_standard_cs[devices[i].chip_select];
+
+		if (!gpio_is_valid(cs_pin))
+			continue;
 
 		if (devices[i].bus_num == 0)
 			enable_spi0 = 1;

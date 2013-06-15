@@ -132,6 +132,7 @@ struct snd_card {
 	int shutdown;			/* this card is going down */
 	int free_on_last_close;		/* free in context of file_release */
 	wait_queue_head_t shutdown_sleep;
+	atomic_t refcount;		/* refcount for disconnection */
 	struct device *dev;		/* device assigned to this card */
 	struct device *card_dev;	/* cardX object for sysfs */
 
@@ -189,6 +190,7 @@ struct snd_minor {
 	const struct file_operations *f_ops;	/* file operations */
 	void *private_data;		/* private data for f_ops->open */
 	struct device *dev;		/* device for sysfs */
+	struct snd_card *card_ptr;	/* assigned card instance */
 };
 
 /* return a device pointer linked to each sound device as a parent */
@@ -295,6 +297,7 @@ int snd_card_info_done(void);
 int snd_component_add(struct snd_card *card, const char *component);
 int snd_card_file_add(struct snd_card *card, struct file *file);
 int snd_card_file_remove(struct snd_card *card, struct file *file);
+void snd_card_unref(struct snd_card *card);
 
 #define snd_card_set_dev(card, devptr) ((card)->dev = (devptr))
 
@@ -325,6 +328,13 @@ void release_and_free_resource(struct resource *res);
 
 /* --- */
 
+/* sound printk debug levels */
+enum {
+	SND_PR_ALWAYS,
+	SND_PR_DEBUG,
+	SND_PR_VERBOSE,
+};
+
 #if defined(CONFIG_SND_DEBUG) || defined(CONFIG_SND_VERBOSE_PRINTK)
 __printf(4, 5)
 void __snd_printk(unsigned int level, const char *file, int line,
@@ -354,6 +364,8 @@ void __snd_printk(unsigned int level, const char *file, int line,
  */
 #define snd_printd(fmt, args...) \
 	__snd_printk(1, __FILE__, __LINE__, fmt, ##args)
+#define _snd_printd(level, fmt, args...) \
+	__snd_printk(level, __FILE__, __LINE__, fmt, ##args)
 
 /**
  * snd_BUG - give a BUG warning message and stack trace
@@ -383,6 +395,7 @@ void __snd_printk(unsigned int level, const char *file, int line,
 #else /* !CONFIG_SND_DEBUG */
 
 #define snd_printd(fmt, args...)	do { } while (0)
+#define _snd_printd(level, fmt, args...) do { } while (0)
 #define snd_BUG()			do { } while (0)
 static inline int __snd_bug_on(int cond)
 {

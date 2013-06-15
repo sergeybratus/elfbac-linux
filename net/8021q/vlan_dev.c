@@ -157,7 +157,7 @@ static netdev_tx_t vlan_dev_hard_start_xmit(struct sk_buff *skb,
 		skb = __vlan_hwaccel_put_tag(skb, vlan_tci);
 	}
 
-	skb_set_dev(skb, vlan_dev_priv(dev)->real_dev);
+	skb->dev = vlan_dev_priv(dev)->real_dev;
 	len = skb->len;
 	if (netpoll_tx_running(dev))
 		return skb->dev->netdev_ops->ndo_start_xmit(skb, skb->dev);
@@ -598,7 +598,7 @@ static netdev_features_t vlan_dev_fix_features(struct net_device *dev,
 	netdev_features_t features)
 {
 	struct net_device *real_dev = vlan_dev_priv(dev)->real_dev;
-	u32 old_features = features;
+	netdev_features_t old_features = features;
 
 	features &= real_dev->vlan_features;
 	features |= NETIF_F_RXCSUM;

@@ -437,6 +437,14 @@ static inline void mce_gather_info(struct mce *m, struct pt_regs *regs)
 		if (m->mcgstatus & (MCG_STATUS_RIPV|MCG_STATUS_EIPV)) {
 			m->ip = regs->ip;
 			m->cs = regs->cs;
+
+			/*
+			 * When in VM86 mode make the cs look like ring 3
+			 * always. This is a lie, but it's better than passing
+			 * the additional vm86 bit around everywhere.
+			 */
+			if (v8086_mode(regs))
+				m->cs |= 3;
 		}
 		/* Use accurate RIP reporting if available. */
 		if (rip_msr)
@@ -945,9 +953,10 @@ struct mce_info {
 	atomic_t		inuse;
 	struct task_struct	*t;
 	__u64			paddr;
+	int			restartable;
 } mce_info[MCE_INFO_MAX];
 
-static void mce_save_info(__u64 addr)
+static void mce_save_info(__u64 addr, int c)
 {
 	struct mce_info *mi;
 
@@ -955,6 +964,7 @@ static void mce_save_info(__u64 addr)
 		if (atomic_cmpxchg(&mi->inuse, 0, 1) == 0) {
 			mi->t = current;
 			mi->paddr = addr;
+			mi->restartable = c;
 			return;
 		}
 	}
@@ -1130,7 +1140,7 @@ void do_machine_check(struct pt_regs *regs, long error_code)
 			mce_panic("Fatal machine check on current CPU", &m, msg);
 		if (worst == MCE_AR_SEVERITY) {
 			/* schedule action before return to userland */
-			mce_save_info(m.addr);
+			mce_save_info(m.addr, m.mcgstatus & MCG_STATUS_RIPV);
 			set_thread_flag(TIF_MCE_NOTIFY);
 		} else if (kill_it) {
 			force_sig(SIGBUS, current);
@@ -1170,6 +1180,7 @@ void mce_notify_process(void)
 {
 	unsigned long pfn;
 	struct mce_info *mi = mce_find_info();
+	int flags = MF_ACTION_REQUIRED;
 
 	if (!mi)
 		mce_panic("Lost physical address for unconsumed uncorrectable error", NULL, NULL);
@@ -1179,7 +1190,14 @@ void mce_notify_process(void)
 
 	pr_err("Uncorrected hardware memory error in user-access at %llx",
 		 mi->paddr);
-	if (memory_failure(pfn, MCE_VECTOR, MF_ACTION_REQUIRED) < 0) {
+	/*
+	 * We must call memory_failure() here even if the current process is
+	 * doomed. We still need to mark the page as poisoned and alert any
+	 * other users of the page.
+	 */
+	if (!mi->restartable)
+		flags |= MF_MUST_KILL;
+	if (memory_failure(pfn, MCE_VECTOR, flags) < 0) {
 		pr_err("Memory error not recovered");
 		force_sig(SIGBUS, current);
 	}

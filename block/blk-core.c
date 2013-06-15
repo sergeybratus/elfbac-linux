@@ -483,7 +483,7 @@ struct request_queue *blk_alloc_queue_node(gfp_t gfp_mask, int node_id)
 	if (!q)
 		return NULL;
 
-	q->id = ida_simple_get(&blk_queue_ida, 0, 0, GFP_KERNEL);
+	q->id = ida_simple_get(&blk_queue_ida, 0, 0, gfp_mask);
 	if (q->id < 0)
 		goto fail_q;
 
@@ -601,7 +601,7 @@ blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
 	q->request_fn		= rfn;
 	q->prep_rq_fn		= NULL;
 	q->unprep_rq_fn		= NULL;
-	q->queue_flags		= QUEUE_FLAG_DEFAULT;
+	q->queue_flags		|= QUEUE_FLAG_DEFAULT;
 
 	/* Override internal queue lock with supplied lock pointer */
 	if (lock)
@@ -1277,7 +1277,8 @@ static bool attempt_plug_merge(struct request_queue *q, struct bio *bio,
 	list_for_each_entry_reverse(rq, &plug->list, queuelist) {
 		int el_ret;
 
-		(*request_count)++;
+		if (rq->q == q)
+			(*request_count)++;
 
 		if (rq->q != q || !blk_rq_merge_ok(rq, bio))
 			continue;

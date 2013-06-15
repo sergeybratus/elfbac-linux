@@ -412,7 +412,7 @@ static void print_digital_conv(struct snd_info_buffer *buffer,
 	if (digi1 & AC_DIG1_EMPHASIS)
 		snd_iprintf(buffer, " Preemphasis");
 	if (digi1 & AC_DIG1_COPYRIGHT)
-		snd_iprintf(buffer, " Copyright");
+		snd_iprintf(buffer, " Non-Copyright");
 	if (digi1 & AC_DIG1_NONAUDIO)
 		snd_iprintf(buffer, " Non-Audio");
 	if (digi1 & AC_DIG1_PROFESSIONAL)
@@ -651,9 +651,16 @@ static void print_codec_info(struct snd_info_entry *entry,
 			snd_iprintf(buffer, "  Amp-In caps: ");
 			print_amp_caps(buffer, codec, nid, HDA_INPUT);
 			snd_iprintf(buffer, "  Amp-In vals: ");
-			print_amp_vals(buffer, codec, nid, HDA_INPUT,
-				       wid_caps & AC_WCAP_STEREO,
-				       wid_type == AC_WID_PIN ? 1 : conn_len);
+			if (wid_type == AC_WID_PIN ||
+			    (codec->single_adc_amp &&
+			     wid_type == AC_WID_AUD_IN))
+				print_amp_vals(buffer, codec, nid, HDA_INPUT,
+					       wid_caps & AC_WCAP_STEREO,
+					       1);
+			else
+				print_amp_vals(buffer, codec, nid, HDA_INPUT,
+					       wid_caps & AC_WCAP_STEREO,
+					       conn_len);
 		}
 		if (wid_caps & AC_WCAP_OUT_AMP) {
 			snd_iprintf(buffer, "  Amp-Out caps: ");

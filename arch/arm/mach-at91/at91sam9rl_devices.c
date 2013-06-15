@@ -314,7 +314,7 @@ static struct i2c_gpio_platform_data pdata = {
 
 static struct platform_device at91sam9rl_twi_device = {
 	.name			= "i2c-gpio",
-	.id			= -1,
+	.id			= 0,
 	.dev.platform_data	= &pdata,
 };
 
@@ -418,6 +418,9 @@ void __init at91_add_device_spi(struct spi_board_info *devices, int nr_devices)
 			cs_pin = (unsigned long) devices[i].controller_data;
 		else
 			cs_pin = spi_standard_cs[devices[i].chip_select];
+
+		if (!gpio_is_valid(cs_pin))
+			continue;
 
 		/* enable chip-select pin */
 		at91_set_gpio_output(cs_pin, 1);

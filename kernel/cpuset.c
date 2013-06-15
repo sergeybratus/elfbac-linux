@@ -270,11 +270,11 @@ static struct file_system_type cpuset_fs_type = {
  * are online.  If none are online, walk up the cpuset hierarchy
  * until we find one that does have some online cpus.  If we get
  * all the way to the top and still haven't found any online cpus,
- * return cpu_online_map.  Or if passed a NULL cs from an exit'ing
- * task, return cpu_online_map.
+ * return cpu_online_mask.  Or if passed a NULL cs from an exit'ing
+ * task, return cpu_online_mask.
  *
  * One way or another, we guarantee to return some non-empty subset
- * of cpu_online_map.
+ * of cpu_online_mask.
  *
  * Call with callback_mutex held.
  */
@@ -867,7 +867,7 @@ static int update_cpumask(struct cpuset *cs, struct cpuset *trialcs,
 	int retval;
 	int is_load_balanced;
 
-	/* top_cpuset.cpus_allowed tracks cpu_online_map; it's read-only */
+	/* top_cpuset.cpus_allowed tracks cpu_online_mask; it's read-only */
 	if (cs == &top_cpuset)
 		return -EACCES;
 
@@ -2065,6 +2065,9 @@ static void scan_for_empty_cpusets(struct cpuset *root)
  * (of no affect) on systems that are actively using CPU hotplug
  * but making no active use of cpusets.
  *
+ * The only exception to this is suspend/resume, where we don't
+ * modify cpusets at all.
+ *
  * This routine ensures that top_cpuset.cpus_allowed tracks
  * cpu_active_mask on each CPU hotplug (cpuhp) event.
  *
@@ -2149,7 +2152,7 @@ void __init cpuset_init_smp(void)
  *
  * Description: Returns the cpumask_var_t cpus_allowed of the cpuset
  * attached to the specified @tsk.  Guaranteed to return some non-empty
- * subset of cpu_online_map, even if this means going outside the
+ * subset of cpu_online_mask, even if this means going outside the
  * tasks cpuset.
  **/
 
@@ -2476,8 +2479,16 @@ void cpuset_print_task_mems_allowed(struct task_struct *tsk)
 
 	dentry = task_cs(tsk)->css.cgroup->dentry;
 	spin_lock(&cpuset_buffer_lock);
-	snprintf(cpuset_name, CPUSET_NAME_LEN,
-		 dentry ? (const char *)dentry->d_name.name : "/");
+
+	if (!dentry) {
+		strcpy(cpuset_name, "/");
+	} else {
+		spin_lock(&dentry->d_lock);
+		strlcpy(cpuset_name, (const char *)dentry->d_name.name,
+			CPUSET_NAME_LEN);
+		spin_unlock(&dentry->d_lock);
+	}
+
 	nodelist_scnprintf(cpuset_nodelist, CPUSET_NODELIST_LEN,
 			   tsk->mems_allowed);
 	printk(KERN_INFO "%s cpuset=%s mems_allowed=%s\n",

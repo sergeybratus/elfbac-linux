@@ -463,7 +463,7 @@ static struct i2c_gpio_platform_data pdata = {
 
 static struct platform_device at91rm9200_twi_device = {
 	.name			= "i2c-gpio",
-	.id			= -1,
+	.id			= 0,
 	.dev.platform_data	= &pdata,
 };
 
@@ -1173,7 +1173,6 @@ void __init at91_add_device_serial(void)
 		printk(KERN_INFO "AT91: No default serial console defined.\n");
 }
 #else
-void __init __deprecated at91_init_serial(struct at91_uart_config *config) {}
 void __init at91_register_uart(unsigned id, unsigned portnr, unsigned pins) {}
 void __init at91_set_serial_console(unsigned portnr) {}
 void __init at91_add_device_serial(void) {}

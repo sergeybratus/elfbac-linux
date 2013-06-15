@@ -145,7 +145,7 @@ static int remove_migration_pte(struct page *new, struct vm_area_struct *vma,
 	if (PageHuge(new))
 		pte = pte_mkhuge(pte);
 #endif
-	flush_cache_page(vma, addr, pte_pfn(pte));
+	flush_dcache_page(new);
 	set_pte_at(mm, addr, ptep, pte);
 
 	if (PageHuge(new)) {
@@ -1388,14 +1388,14 @@ SYSCALL_DEFINE6(move_pages, pid_t, pid, unsigned long, nr_pages,
 	mm = get_task_mm(task);
 	put_task_struct(task);
 
-	if (mm) {
-		if (nodes)
-			err = do_pages_move(mm, task_nodes, nr_pages, pages,
-					    nodes, status, flags);
-		else
-			err = do_pages_stat(mm, nr_pages, pages, status);
-	} else
-		err = -EINVAL;
+	if (!mm)
+		return -EINVAL;
+
+	if (nodes)
+		err = do_pages_move(mm, task_nodes, nr_pages, pages,
+				    nodes, status, flags);
+	else
+		err = do_pages_stat(mm, nr_pages, pages, status);
 
 	mmput(mm);
 	return err;

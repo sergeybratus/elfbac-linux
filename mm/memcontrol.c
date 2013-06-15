@@ -1489,17 +1489,26 @@ static int mem_cgroup_count_children(struct mem_cgroup *memcg)
 u64 mem_cgroup_get_limit(struct mem_cgroup *memcg)
 {
 	u64 limit;
-	u64 memsw;
 
 	limit = res_counter_read_u64(&memcg->res, RES_LIMIT);
-	limit += total_swap_pages << PAGE_SHIFT;
 
-	memsw = res_counter_read_u64(&memcg->memsw, RES_LIMIT);
 	/*
-	 * If memsw is finite and limits the amount of swap space available
-	 * to this memcg, return that limit.
+	 * Do not consider swap space if we cannot swap due to swappiness
 	 */
-	return min(limit, memsw);
+	if (mem_cgroup_swappiness(memcg)) {
+		u64 memsw;
+
+		limit += total_swap_pages << PAGE_SHIFT;
+		memsw = res_counter_read_u64(&memcg->memsw, RES_LIMIT);
+
+		/*
+		 * If memsw is finite and limits the amount of swap space
+		 * available to this memcg, return that limit.
+		 */
+		limit = min(limit, memsw);
+	}
+
+	return limit;
 }
 
 static unsigned long mem_cgroup_reclaim(struct mem_cgroup *memcg,
@@ -2165,7 +2174,7 @@ static int __cpuinit memcg_cpu_hotplug_callback(struct notifier_block *nb,
 	if (action == CPU_ONLINE)
 		return NOTIFY_OK;
 
-	if ((action != CPU_DEAD) || action != CPU_DEAD_FROZEN)
+	if (action != CPU_DEAD && action != CPU_DEAD_FROZEN)
 		return NOTIFY_OK;
 
 	for_each_mem_cgroup(iter)
@@ -2476,10 +2485,10 @@ struct mem_cgroup *try_get_mem_cgroup_from_page(struct page *page)
 static void __mem_cgroup_commit_charge(struct mem_cgroup *memcg,
 				       struct page *page,
 				       unsigned int nr_pages,
-				       struct page_cgroup *pc,
 				       enum charge_type ctype,
 				       bool lrucare)
 {
+	struct page_cgroup *pc = lookup_page_cgroup(page);
 	struct zone *uninitialized_var(zone);
 	bool was_on_lru = false;
 	bool anon;
@@ -2716,7 +2725,6 @@ static int mem_cgroup_charge_common(struct page *page, struct mm_struct *mm,
 {
 	struct mem_cgroup *memcg = NULL;
 	unsigned int nr_pages = 1;
-	struct page_cgroup *pc;
 	bool oom = true;
 	int ret;
 
@@ -2730,11 +2738,10 @@ static int mem_cgroup_charge_common(struct page *page, struct mm_struct *mm,
 		oom = false;
 	}
 
-	pc = lookup_page_cgroup(page);
 	ret = __mem_cgroup_try_charge(mm, gfp_mask, nr_pages, &memcg, oom);
 	if (ret == -ENOMEM)
 		return ret;
-	__mem_cgroup_commit_charge(memcg, page, nr_pages, pc, ctype, false);
+	__mem_cgroup_commit_charge(memcg, page, nr_pages, ctype, false);
 	return 0;
 }
 
@@ -2831,16 +2838,13 @@ static void
 __mem_cgroup_commit_charge_swapin(struct page *page, struct mem_cgroup *memcg,
 					enum charge_type ctype)
 {
-	struct page_cgroup *pc;
-
 	if (mem_cgroup_disabled())
 		return;
 	if (!memcg)
 		return;
 	cgroup_exclude_rmdir(&memcg->css);
 
-	pc = lookup_page_cgroup(page);
-	__mem_cgroup_commit_charge(memcg, page, 1, pc, ctype, true);
+	__mem_cgroup_commit_charge(memcg, page, 1, ctype, true);
 	/*
 	 * Now swap is on-memory. This means this page may be
 	 * counted both as mem and swap....double count.
@@ -3298,14 +3302,13 @@ int mem_cgroup_prepare_migration(struct page *page,
 	 * page. In the case new page is migrated but not remapped, new page's
 	 * mapcount will be finally 0 and we call uncharge in end_migration().
 	 */
-	pc = lookup_page_cgroup(newpage);
 	if (PageAnon(page))
 		ctype = MEM_CGROUP_CHARGE_TYPE_MAPPED;
 	else if (page_is_file_cache(page))
 		ctype = MEM_CGROUP_CHARGE_TYPE_CACHE;
 	else
 		ctype = MEM_CGROUP_CHARGE_TYPE_SHMEM;
-	__mem_cgroup_commit_charge(memcg, newpage, 1, pc, ctype, false);
+	__mem_cgroup_commit_charge(memcg, newpage, 1, ctype, false);
 	return ret;
 }
 
@@ -3392,7 +3395,7 @@ void mem_cgroup_replace_page_cache(struct page *oldpage,
 	 * the newpage may be on LRU(or pagevec for LRU) already. We lock
 	 * LRU while we overwrite pc->mem_cgroup.
 	 */
-	__mem_cgroup_commit_charge(memcg, newpage, 1, pc, type, true);
+	__mem_cgroup_commit_charge(memcg, newpage, 1, type, true);
 }
 
 #ifdef CONFIG_DEBUG_VM
@@ -3763,7 +3766,7 @@ move_account:
 			goto try_to_free;
 		cond_resched();
 	/* "ret" should also be checked to ensure all lists are empty. */
-	} while (memcg->res.usage > 0 || ret);
+	} while (res_counter_read_u64(&memcg->res, RES_USAGE) > 0 || ret);
 out:
 	css_put(&memcg->css);
 	return ret;
@@ -3778,7 +3781,7 @@ try_to_free:
 	lru_add_drain_all();
 	/* try to free all pages in this cgroup */
 	shrink = 1;
-	while (nr_retries && memcg->res.usage > 0) {
+	while (nr_retries && res_counter_read_u64(&memcg->res, RES_USAGE) > 0) {
 		int progress;
 
 		if (signal_pending(current)) {
@@ -4513,6 +4516,12 @@ static void mem_cgroup_usage_unregister_event(struct cgroup *cgrp,
 swap_buffers:
 	/* Swap primary and spare array */
 	thresholds->spare = thresholds->primary;
+	/* If all events are unregistered, free the spare array */
+	if (!new) {
+		kfree(thresholds->spare);
+		thresholds->spare = NULL;
+	}
+
 	rcu_assign_pointer(thresholds->primary, new);
 
 	/* To be sure that nobody uses thresholds */
@@ -5481,7 +5490,7 @@ static int mem_cgroup_move_charge_pte_range(pmd_t *pmd,
 	 *    part of thp split is not executed yet.
 	 */
 	if (pmd_trans_huge_lock(pmd, vma) == 1) {
-		if (!mc.precharge) {
+		if (mc.precharge < HPAGE_PMD_NR) {
 			spin_unlock(&vma->vm_mm->page_table_lock);
 			return 0;
 		}

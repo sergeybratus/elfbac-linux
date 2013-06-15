@@ -47,6 +47,7 @@ static int nouveau_init_engine_ptrs(struct drm_device *dev)
 {
 	struct drm_nouveau_private *dev_priv = dev->dev_private;
 	struct nouveau_engine *engine = &dev_priv->engine;
+	u32 pclass = dev->pdev->class >> 8;
 
 	switch (dev_priv->chipset & 0xf0) {
 	case 0x00:
@@ -526,7 +527,8 @@ static int nouveau_init_engine_ptrs(struct drm_device *dev)
 	}
 
 	/* headless mode */
-	if (nouveau_modeset == 2) {
+	if (nouveau_modeset == 2 ||
+	    (nouveau_modeset < 0 && pclass != PCI_CLASS_DISPLAY_VGA)) {
 		engine->display.early_init = nouveau_stub_init;
 		engine->display.late_takedown = nouveau_stub_takedown;
 		engine->display.create = nouveau_stub_init;
@@ -642,7 +644,7 @@ nouveau_card_channel_init(struct drm_device *dev)
 		OUT_RING  (chan, chan->vram_handle);
 		OUT_RING  (chan, chan->gart_handle);
 	} else
-	if (dev_priv->card_type <= NV_C0) {
+	if (dev_priv->card_type <= NV_D0) {
 		ret = nouveau_gpuobj_gr_new(chan, 0x9039, 0x9039);
 		if (ret)
 			goto error;

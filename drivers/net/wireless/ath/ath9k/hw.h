@@ -48,6 +48,7 @@
 #define AR9300_DEVID_AR9580	0x0033
 #define AR9300_DEVID_AR9462	0x0034
 #define AR9300_DEVID_AR9330	0x0035
+#define AR9485_DEVID_AR1111	0x0037
 
 #define AR5416_AR9100_DEVID	0x000b
 
@@ -985,7 +986,8 @@ void ath9k_hw_name(struct ath_hw *ah, char *hw_name, size_t len);
 /* PHY */
 void ath9k_hw_get_delta_slope_vals(struct ath_hw *ah, u32 coef_scaled,
 				   u32 *coef_mantissa, u32 *coef_exponent);
-void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan);
+void ath9k_hw_apply_txpower(struct ath_hw *ah, struct ath9k_channel *chan,
+			    bool test);
 
 /*
  * Code Specific to AR5008, AR9001 or AR9002,
@@ -1012,6 +1014,7 @@ int ar9003_paprd_setup_gain_table(struct ath_hw *ah, int chain);
 int ar9003_paprd_init_table(struct ath_hw *ah);
 bool ar9003_paprd_is_done(struct ath_hw *ah);
 void ar9003_hw_set_paprd_txdesc(struct ath_hw *ah, void *ds, u8 chains);
+void ar9003_hw_set_chain_masks(struct ath_hw *ah, u8 rx, u8 tx);
 
 /* Hardware family op attach helpers */
 void ar5008_hw_attach_phy_ops(struct ath_hw *ah);

@@ -393,7 +393,7 @@ struct ip_vs_protocol {
 
 	void (*exit)(struct ip_vs_protocol *pp);
 
-	void (*init_netns)(struct net *net, struct ip_vs_proto_data *pd);
+	int (*init_netns)(struct net *net, struct ip_vs_proto_data *pd);
 
 	void (*exit_netns)(struct net *net, struct ip_vs_proto_data *pd);
 
@@ -1203,6 +1203,8 @@ ip_vs_lookup_real_service(struct net *net, int af, __u16 protocol,
 
 extern int ip_vs_use_count_inc(void);
 extern void ip_vs_use_count_dec(void);
+extern int ip_vs_register_nl_ioctl(void);
+extern void ip_vs_unregister_nl_ioctl(void);
 extern int ip_vs_control_init(void);
 extern void ip_vs_control_cleanup(void);
 extern struct ip_vs_dest *
@@ -1354,7 +1356,7 @@ static inline void ip_vs_notrack(struct sk_buff *skb)
 	struct nf_conn *ct = nf_ct_get(skb, &ctinfo);
 
 	if (!ct || !nf_ct_is_untracked(ct)) {
-		nf_reset(skb);
+		nf_conntrack_put(skb->nfct);
 		skb->nfct = &nf_ct_untracked_get()->ct_general;
 		skb->nfctinfo = IP_CT_NEW;
 		nf_conntrack_get(skb->nfct);

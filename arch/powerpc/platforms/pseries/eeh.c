@@ -1029,7 +1029,7 @@ static void eeh_add_device_early(struct device_node *dn)
 {
 	struct pci_controller *phb;
 
-	if (!dn || !of_node_to_eeh_dev(dn))
+	if (!of_node_to_eeh_dev(dn))
 		return;
 	phb = of_node_to_eeh_dev(dn)->phb;
 
@@ -1076,7 +1076,7 @@ static void eeh_add_device_late(struct pci_dev *dev)
 	pr_debug("EEH: Adding device %s\n", pci_name(dev));
 
 	dn = pci_device_to_OF_node(dev);
-	edev = pci_dev_to_eeh_dev(dev);
+	edev = of_node_to_eeh_dev(dn);
 	if (edev->pdev == dev) {
 		pr_debug("EEH: Already referenced !\n");
 		return;

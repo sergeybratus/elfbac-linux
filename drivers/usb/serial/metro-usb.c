@@ -27,8 +27,8 @@
 
 /* Product information. */
 #define FOCUS_VENDOR_ID			0x0C2E
-#define FOCUS_PRODUCT_ID		0x0720
-#define FOCUS_PRODUCT_ID_UNI		0x0710
+#define FOCUS_PRODUCT_ID_BI		0x0720
+#define FOCUS_PRODUCT_ID_UNI		0x0700
 
 #define METROUSB_SET_REQUEST_TYPE	0x40
 #define METROUSB_SET_MODEM_CTRL_REQUEST	10
@@ -47,7 +47,7 @@ struct metrousb_private {
 
 /* Device table list. */
 static struct usb_device_id id_table[] = {
-	{ USB_DEVICE(FOCUS_VENDOR_ID, FOCUS_PRODUCT_ID) },
+	{ USB_DEVICE(FOCUS_VENDOR_ID, FOCUS_PRODUCT_ID_BI) },
 	{ USB_DEVICE(FOCUS_VENDOR_ID, FOCUS_PRODUCT_ID_UNI) },
 	{ }, /* Terminating entry. */
 };
@@ -170,14 +170,6 @@ static int metrousb_open(struct tty_struct *tty, struct usb_serial_port *port)
 	metro_priv->control_state = 0;
 	metro_priv->throttled = 0;
 	spin_unlock_irqrestore(&metro_priv->lock, flags);
-
-	/*
-	 * Force low_latency on so that our tty_push actually forces the data
-	 * through, otherwise it is scheduled, and with high data rates (like
-	 * with OHCI) data can get lost.
-	 */
-	if (tty)
-		tty->low_latency = 1;
 
 	/* Clear the urb pipe. */
 	usb_clear_halt(serial->dev, port->interrupt_in_urb->pipe);

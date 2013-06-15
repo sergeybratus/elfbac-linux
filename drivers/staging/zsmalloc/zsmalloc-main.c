@@ -267,33 +267,39 @@ static unsigned long obj_idx_to_offset(struct page *page,
 	return off + obj_idx * class_size;
 }
 
+static void reset_page(struct page *page)
+{
+	clear_bit(PG_private, &page->flags);
+	clear_bit(PG_private_2, &page->flags);
+	set_page_private(page, 0);
+	page->mapping = NULL;
+	page->freelist = NULL;
+	reset_page_mapcount(page);
+}
+
 static void free_zspage(struct page *first_page)
 {
-	struct page *nextp, *tmp;
+	struct page *nextp, *tmp, *head_extra;
 
 	BUG_ON(!is_first_page(first_page));
 	BUG_ON(first_page->inuse);
 
-	nextp = (struct page *)page_private(first_page);
+	head_extra = (struct page *)page_private(first_page);
 
-	clear_bit(PG_private, &first_page->flags);
-	clear_bit(PG_private_2, &first_page->flags);
-	set_page_private(first_page, 0);
-	first_page->mapping = NULL;
-	first_page->freelist = NULL;
-	reset_page_mapcount(first_page);
+	reset_page(first_page);
 	__free_page(first_page);
 
 	/* zspage with only 1 system page */
-	if (!nextp)
+	if (!head_extra)
 		return;
 
-	list_for_each_entry_safe(nextp, tmp, &nextp->lru, lru) {
+	list_for_each_entry_safe(nextp, tmp, &head_extra->lru, lru) {
 		list_del(&nextp->lru);
-		clear_bit(PG_private_2, &nextp->flags);
-		nextp->index = 0;
+		reset_page(nextp);
 		__free_page(nextp);
 	}
+	reset_page(head_extra);
+	__free_page(head_extra);
 }
 
 /* Initialize a newly allocated zspage */
@@ -420,12 +426,6 @@ static struct page *find_get_zspage(struct size_class *class)
 }
 
 
-/*
- * If this becomes a separate module, register zs_init() with
- * module_init(), zs_exit with module_exit(), and remove zs_initialized
-*/
-static int zs_initialized;
-
 static int zs_cpu_notifier(struct notifier_block *nb, unsigned long action,
 				void *pcpu)
 {
@@ -484,7 +484,7 @@ fail:
 
 struct zs_pool *zs_create_pool(const char *name, gfp_t flags)
 {
-	int i, error, ovhd_size;
+	int i, ovhd_size;
 	struct zs_pool *pool;
 
 	if (!name)
@@ -511,27 +511,8 @@ struct zs_pool *zs_create_pool(const char *name, gfp_t flags)
 
 	}
 
-	/*
-	 * If this becomes a separate module, register zs_init with
-	 * module_init, and remove this block
-	*/
-	if (!zs_initialized) {
-		error = zs_init();
-		if (error)
-			goto cleanup;
-		zs_initialized = 1;
-	}
-
 	pool->flags = flags;
 	pool->name = name;
-
-	error = 0; /* Success */
-
-cleanup:
-	if (error) {
-		zs_destroy_pool(pool);
-		pool = NULL;
-	}
 
 	return pool;
 }
@@ -743,3 +724,9 @@ u64 zs_get_total_size_bytes(struct zs_pool *pool)
 	return npages << PAGE_SHIFT;
 }
 EXPORT_SYMBOL_GPL(zs_get_total_size_bytes);
+
+module_init(zs_init);
+module_exit(zs_exit);
+
+MODULE_LICENSE("Dual BSD/GPL");
+MODULE_AUTHOR("Nitin Gupta <ngupta@vflare.org>");

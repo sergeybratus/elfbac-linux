@@ -103,13 +103,11 @@ unsigned long __initdata pci_reserve_end_pfn = -1U;
 
 static int __init setup_maxmem(char *str)
 {
-	long maxmem_mb;
-	if (str == NULL || strict_strtol(str, 0, &maxmem_mb) != 0 ||
-	    maxmem_mb == 0)
+	unsigned long long maxmem;
+	if (str == NULL || (maxmem = memparse(str, NULL)) == 0)
 		return -EINVAL;
 
-	maxmem_pfn = (maxmem_mb >> (HPAGE_SHIFT - 20)) <<
-		(HPAGE_SHIFT - PAGE_SHIFT);
+	maxmem_pfn = (maxmem >> HPAGE_SHIFT) << (HPAGE_SHIFT - PAGE_SHIFT);
 	pr_info("Forcing RAM used to no more than %dMB\n",
 	       maxmem_pfn >> (20 - PAGE_SHIFT));
 	return 0;
@@ -119,14 +117,15 @@ early_param("maxmem", setup_maxmem);
 static int __init setup_maxnodemem(char *str)
 {
 	char *endp;
-	long maxnodemem_mb, node;
+	unsigned long long maxnodemem;
+	long node;
 
 	node = str ? simple_strtoul(str, &endp, 0) : INT_MAX;
-	if (node >= MAX_NUMNODES || *endp != ':' ||
-	    strict_strtol(endp+1, 0, &maxnodemem_mb) != 0)
+	if (node >= MAX_NUMNODES || *endp != ':')
 		return -EINVAL;
 
-	maxnodemem_pfn[node] = (maxnodemem_mb >> (HPAGE_SHIFT - 20)) <<
+	maxnodemem = memparse(endp+1, NULL);
+	maxnodemem_pfn[node] = (maxnodemem >> HPAGE_SHIFT) <<
 		(HPAGE_SHIFT - PAGE_SHIFT);
 	pr_info("Forcing RAM used on node %ld to no more than %dMB\n",
 	       node, maxnodemem_pfn[node] >> (20 - PAGE_SHIFT));
@@ -914,7 +913,7 @@ void __cpuinit setup_cpu(int boot)
 #ifdef CONFIG_BLK_DEV_INITRD
 
 static int __initdata set_initramfs_file;
-static char __initdata initramfs_file[128] = "initramfs.cpio.gz";
+static char __initdata initramfs_file[128] = "initramfs";
 
 static int __init setup_initramfs_file(char *str)
 {
@@ -928,9 +927,9 @@ static int __init setup_initramfs_file(char *str)
 early_param("initramfs_file", setup_initramfs_file);
 
 /*
- * We look for an additional "initramfs.cpio.gz" file in the hvfs.
- * If there is one, we allocate some memory for it and it will be
- * unpacked to the initramfs after any built-in initramfs_data.
+ * We look for a file called "initramfs" in the hvfs.  If there is one, we
+ * allocate some memory for it and it will be unpacked to the initramfs.
+ * If it's compressed, the initd code will uncompress it first.
  */
 static void __init load_hv_initrd(void)
 {
@@ -940,10 +939,16 @@ static void __init load_hv_initrd(void)
 
 	fd = hv_fs_findfile((HV_VirtAddr) initramfs_file);
 	if (fd == HV_ENOENT) {
-		if (set_initramfs_file)
+		if (set_initramfs_file) {
 			pr_warning("No such hvfs initramfs file '%s'\n",
 				   initramfs_file);
-		return;
+			return;
+		} else {
+			/* Try old backwards-compatible name. */
+			fd = hv_fs_findfile((HV_VirtAddr)"initramfs.cpio.gz");
+			if (fd == HV_ENOENT)
+				return;
+		}
 	}
 	BUG_ON(fd < 0);
 	stat = hv_fs_fstat(fd);
@@ -1100,7 +1105,7 @@ EXPORT_SYMBOL(hash_for_home_map);
 
 /*
  * cpu_cacheable_map lists all the cpus whose caches the hypervisor can
- * flush on our behalf.  It is set to cpu_possible_map OR'ed with
+ * flush on our behalf.  It is set to cpu_possible_mask OR'ed with
  * hash_for_home_map, and it is what should be passed to
  * hv_flush_remote() to flush all caches.  Note that if there are
  * dedicated hypervisor driver tiles that have authorized use of their
@@ -1186,7 +1191,7 @@ static void __init setup_cpu_maps(void)
 			      sizeof(cpu_lotar_map));
 	if (rc < 0) {
 		pr_err("warning: no HV_INQ_TILES_LOTAR; using AVAIL\n");
-		cpu_lotar_map = cpu_possible_map;
+		cpu_lotar_map = *cpu_possible_mask;
 	}
 
 #if CHIP_HAS_CBOX_HOME_MAP()
@@ -1196,9 +1201,9 @@ static void __init setup_cpu_maps(void)
 			      sizeof(hash_for_home_map));
 	if (rc < 0)
 		early_panic("hv_inquire_tiles(HFH_CACHE) failed: rc %d\n", rc);
-	cpumask_or(&cpu_cacheable_map, &cpu_possible_map, &hash_for_home_map);
+	cpumask_or(&cpu_cacheable_map, cpu_possible_mask, &hash_for_home_map);
 #else
-	cpu_cacheable_map = cpu_possible_map;
+	cpu_cacheable_map = *cpu_possible_mask;
 #endif
 }
 

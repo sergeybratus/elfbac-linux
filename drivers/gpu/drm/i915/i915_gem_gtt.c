@@ -65,16 +65,14 @@ int i915_gem_init_aliasing_ppgtt(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct i915_hw_ppgtt *ppgtt;
-	uint32_t pd_entry;
 	unsigned first_pd_entry_in_global_pt;
-	uint32_t __iomem *pd_addr;
 	int i;
 	int ret = -ENOMEM;
 
 	/* ppgtt PDEs reside in the global gtt pagetable, which has 512*1024
 	 * entries. For aliasing ppgtt support we just steal them at the end for
 	 * now. */
-	first_pd_entry_in_global_pt = 512*1024 - I915_PPGTT_PD_ENTRIES;
+	first_pd_entry_in_global_pt = dev_priv->mm.gtt->gtt_total_entries - I915_PPGTT_PD_ENTRIES;
 
 	ppgtt = kzalloc(sizeof(*ppgtt), GFP_KERNEL);
 	if (!ppgtt)
@@ -100,7 +98,6 @@ int i915_gem_init_aliasing_ppgtt(struct drm_device *dev)
 			goto err_pt_alloc;
 	}
 
-	pd_addr = dev_priv->mm.gtt->gtt + first_pd_entry_in_global_pt;
 	for (i = 0; i < ppgtt->num_pd_entries; i++) {
 		dma_addr_t pt_addr;
 		if (dev_priv->mm.gtt->needs_dmar) {
@@ -117,13 +114,7 @@ int i915_gem_init_aliasing_ppgtt(struct drm_device *dev)
 			ppgtt->pt_dma_addr[i] = pt_addr;
 		} else
 			pt_addr = page_to_phys(ppgtt->pt_pages[i]);
-
-		pd_entry = GEN6_PDE_ADDR_ENCODE(pt_addr);
-		pd_entry |= GEN6_PDE_VALID;
-
-		writel(pd_entry, pd_addr + i);
 	}
-	readl(pd_addr);
 
 	ppgtt->scratch_page_dma_addr = dev_priv->mm.gtt->scratch_page_dma;
 
