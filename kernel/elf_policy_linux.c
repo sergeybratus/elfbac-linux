@@ -72,8 +72,7 @@ int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	pte_t *orig_src_pte, *orig_dst_pte;
 	pte_t *src_pte, *dst_pte;
 	spinlock_t *src_ptl, *dst_ptl;
-	int progress = 0;
-	swp_entry_t entry = (swp_entry_t) {0};
+
 
 			again:
 
@@ -295,7 +294,7 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 	return 0;
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end, unsigned short type){
-	/* FIXME: Implement support for type *
+  /* FIXME: Implement support for type */
 	/* down_write(&from->mmap_sem);*/
 	int retval;
 	struct vm_area_struct *mpnt;
@@ -405,7 +404,4 @@ void debug_break_bug(){
 	printk("About to BUG out\n");
 }
 EXPORT_SYMBOL(debug_break_bug);
-struct mm_struct *  debug_tlbstate();
-struct mm_struct *  debug_tlbstate(){
-	return percpu_read(cpu_tlbstate.active_mm);
-}
+

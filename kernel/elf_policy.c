@@ -278,13 +278,13 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
                           return -EINVAL;
 			}
 			data->low = buf.addr1;
+			data->type = buf.type;
 			if(data->type & ELFP_RW_SIZE)
 			  data->high = buf.addr1 + buf.addr2;
 			else 
 			  data->high = buf.addr2;
-			data->type = buf.type;
 			if(data->high <= data->low){
-                          elfp_os_errormsg("Invalid range in ELF policy transition\n");
+                          elfp_os_errormsg("Invalid range %p - %p in ELF policy transition \n",data->low, data->high);
 			  return -EINVAL;
                         }
 			elfp_insert_data_transition(data);
