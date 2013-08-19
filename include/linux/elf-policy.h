@@ -154,7 +154,7 @@ extern int elfp_destroy_policy(struct elf_policy *policy);
 extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk,elfp_intr_state_t regs);
 extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk,int access_type,elfp_intr_state_t regs);
 
-typedef void (*elfp_print_function)(char *data,...);
-int elfp_print_policy(struct elf_policy *pol,elfp_print_function pfunc);
+
+int elfp_print_policy(struct elf_policy *pol,struct elfp_state *cur);
 #endif
 #endif

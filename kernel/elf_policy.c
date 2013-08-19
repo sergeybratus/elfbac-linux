@@ -333,6 +333,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
 		return -EINVAL;
 	}
 	elfp_task_set_policy(tsk,pol,state,regs);
+        elfp_print_policy(pol,state);
 	return 0;
 }
 int elfp_destroy_policy(struct elf_policy *policy)
@@ -370,8 +371,20 @@ int elfp_destroy_policy(struct elf_policy *policy)
 	elfp_free_policy(policy);
 	return 0;
 }
-/* TODO: This breaks the links. At the moment this is for userspace use only*/
-int elfp_print_policy(struct elf_policy *policy,elfp_print_function print){
+int elfp_print_policy(struct elf_policy *policy,struct elfp_state *cur){
+  struct elfp_state *state;
+  for(state=policy->states;state;state = state->next){
 
-	return 0;
+    elfp_os_errormsg("%sState %d\n", (cur == state)?"*": " ", state->id);
+    struct rb_node *iter;
+    for(iter=rb_first(&state->data);iter; iter=rb_next(iter)){
+      struct elfp_data_transition *pp = container_of(iter,struct elfp_data_transition,tree);
+      elfp_os_errormsg("\t %d->%d data\t%lx\t%lx\t%x]\n",pp->from->id,pp->to->id,pp->low,pp->high,pp->type);
+    }  
+    for(iter = rb_first(&state->calls);iter;iter=rb_next(iter)){
+      struct elfp_call_transition *pp = container_of(iter,struct elfp_call_transition,tree);
+      elfp_os_errormsg("\t %d->%d call\t%lx\t%d\t%d\n",pp->from->id,pp->to->id,pp->offset,pp->parambytes,pp->returnbytes);
+    }
+  }
+  return 0;
 }
