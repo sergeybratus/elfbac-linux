@@ -57,7 +57,7 @@ struct   elfp_desc_state{
 #define ELFP_RW_WRITE (1u << 1)
 #define ELFP_RW_EXEC  (1u << 2)
 #define ELFP_RW_SIZE (1u << 3)
-#define ELFP_RW_ALL (ELFP_RW_READ | ELFP_RW_WRITE)
+
 struct elfp_desc_data{
   elfp_chunk_header_t chunktype;
   uintptr_t addr1; /*The start of the address range*/

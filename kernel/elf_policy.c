@@ -37,7 +37,7 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
         }
         struct elfp_call_transition * transition = elfp_os_find_call_transition(state,address);
         if(!transition)
-          return NULL;
+          return 0;
         if(transition->returnbytes >=0) /*If returning will be allowed*/
           {
 #if 0
@@ -62,7 +62,7 @@ struct elfp_data_transition *elfp_os_find_data_transition(struct elfp_state *sta
     else if(address > transition->high)
       node=node->rb_right;
     else 
-      return node;
+      return transition;
   }
   return NULL;
 }
