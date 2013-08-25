@@ -39,7 +39,7 @@
 
 
 #include <linux/elf-policy.h>
-
+static int assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct *mm_b);
 struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack,*elfp_slab_stack_frame;
 
 void __init elfp_init(void) {
@@ -58,51 +58,92 @@ static void elfp_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 				      struct mm_struct *mm,
 				      unsigned long address){
 	if(mm->elfp_clones){
-		struct mm_struct *clone = mm->elfp_clones;
-		while(clone){
-			do_munmap(clone,PAGE_ALIGN(address),PAGE_SIZE);
-			clone = clone->elfp_clones_next;
-		}
+          BUG("delete PTE from each clone");
 	}
 }
 
 int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-		pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
-		unsigned long addr, unsigned long end) {
-	pte_t *orig_src_pte, *orig_dst_pte;
-	pte_t *src_pte, *dst_pte;
-	spinlock_t *src_ptl, *dst_ptl;
+                        pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
+                        unsigned long addr, unsigned long end, pteval_t allowed_flags) {
+  pte_t *orig_src_pte, *orig_dst_pte;
+  pte_t *src_pte, *dst_pte;
+  spinlock_t *src_ptl, *dst_ptl;
 
 
-			again:
+ again:
+ //TODO: on other architectures, this could overwrite
+  dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+  if (!dst_pte)
+    return -ENOMEM;
+  src_pte = pte_offset_map(src_pmd, addr);
+  src_ptl = pte_lockptr(src_mm, src_pmd);
+  spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+  orig_src_pte = src_pte;
+  orig_dst_pte = dst_pte;
+  arch_enter_lazy_mmu_mode();
 
-			dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
-			if (!dst_pte)
-			return -ENOMEM;
-			src_pte = pte_offset_map(src_pmd, addr);
-			src_ptl = pte_lockptr(src_mm, src_pmd);
-			spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
-			orig_src_pte = src_pte;
-			orig_dst_pte = dst_pte;
-			arch_enter_lazy_mmu_mode();
+  do {
+    //set_pte_at(dst_mm, addr, dst_pte, *src_pte & allowed_flags);
+	  dst_pte->pte = src_pte->pte & allowed_flags;
+  }while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
-			do {
-				set_pte_at(dst_mm, addr, dst_pte, *src_pte);
-			}while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
+  arch_leave_lazy_mmu_mode();
+  spin_unlock(src_ptl);
+  pte_unmap(orig_src_pte)  ;
+  pte_unmap_unlock(orig_dst_pte, dst_ptl);
+  cond_resched();
+  if (addr != end)
+    goto again;
+  return 0;
+}
 
-			arch_leave_lazy_mmu_mode();
-			spin_unlock(src_ptl);
-			pte_unmap(orig_src_pte);
-			pte_unmap_unlock(orig_dst_pte, dst_ptl);
-			cond_resched();
-			if (addr != end)
-			goto again;
-			return 0;
-		}
+static inline int copy_huge_pmd_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		  pmd_t *dst_pmd, pmd_t *src_pmd, unsigned long addr,
+                                     struct vm_area_struct *vma,pteval_t allow_flags){
 
+	struct page *src_page;
+	pmd_t pmd;
+	pgtable_t pgtable;
+	int ret;
+
+	ret = -ENOMEM;
+	pgtable = pte_alloc_one(dst_mm, addr);
+	if (unlikely(!pgtable))
+		goto out;
+
+	spin_lock(&dst_mm->page_table_lock);
+	spin_lock_nested(&src_mm->page_table_lock, SINGLE_DEPTH_NESTING);
+
+	ret = -EAGAIN;
+	pmd = *src_pmd;
+	if (unlikely(!pmd_trans_huge(pmd))) {
+		pte_free(dst_mm, pgtable);
+		goto out_unlock;
+	}
+	if (unlikely(pmd_trans_splitting(pmd))) {
+		/* split huge page running from under us */
+		spin_unlock(&src_mm->page_table_lock);
+		spin_unlock(&dst_mm->page_table_lock);
+		pte_free(dst_mm, pgtable);
+
+		wait_split_huge_page(vma->anon_vma, src_pmd); /* src_vma */
+		goto out;
+	}
+	//set_pmd_at(dst_mm, addr, dst_pmd, pmd & allow_flags);
+	dst_pmd->pte = pmd.pte & allow_flags;
+	prepare_pmd_huge_pte(pgtable, dst_mm);
+	dst_mm->nr_ptes++;
+
+	ret = 0;
+out_unlock:
+	spin_unlock(&src_mm->page_table_lock);
+	spin_unlock(&dst_mm->page_table_lock);
+out:
+	return ret;
+}
 static inline int copy_pmd_range(struct mm_struct *dst_mm,
 		struct mm_struct *src_mm, pud_t *dst_pud, pud_t *src_pud,
-		struct vm_area_struct *vma, unsigned long addr, unsigned long end) {
+		struct vm_area_struct *vma, unsigned long addr, unsigned long end,pteval_t allowed_flags) {
 	pmd_t *src_pmd, *dst_pmd;
 	unsigned long next;
 
@@ -115,7 +156,7 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm,
 		if (pmd_trans_huge(*src_pmd)) {
 			int err;
 			VM_BUG_ON(next-addr != HPAGE_PMD_SIZE);
-			err = copy_huge_pmd(dst_mm, src_mm, dst_pmd, src_pmd, addr, vma);
+			err = copy_huge_pmd_dumb(dst_mm, src_mm, dst_pmd, src_pmd, addr, vma,allowed_flags);
 			if (err == -ENOMEM)
 				return -ENOMEM;
 			if (!err)
@@ -125,7 +166,7 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm,
 		if (pmd_none_or_clear_bad(src_pmd))
 			continue;
 		if (copy_pte_range_dumb(dst_mm, src_mm, dst_pmd, src_pmd, vma, addr,
-				next))
+				next,allowed_flags))
 			return -ENOMEM;
 	} while (dst_pmd++, src_pmd++, addr = next, addr != end);
 	return 0;
@@ -133,11 +174,13 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm,
 
 static inline int copy_pud_range(struct mm_struct *dst_mm,
 		struct mm_struct *src_mm, pgd_t *dst_pgd, pgd_t *src_pgd,
-		struct vm_area_struct *vma, unsigned long addr, unsigned long end) {
+		struct vm_area_struct *vma, unsigned long addr, unsigned long end,
+		pteval_t allow_flags) {
 	pud_t *src_pud, *dst_pud;
 	unsigned long next;
-
-	dst_pud = pud_alloc(dst_mm, dst_pgd, addr);
+	dst_pud = pud_offset(dst_pgd,addr);
+	if(pud_none(dst_pup))
+		dst_pud = pud_alloc(dst_mm, dst_pgd, addr);
 	if (!dst_pud)
 		return -ENOMEM;
 	src_pud = pud_offset(src_pgd, addr);
@@ -145,13 +188,13 @@ static inline int copy_pud_range(struct mm_struct *dst_mm,
 		next = pud_addr_end(addr, end);
 		if (pud_none_or_clear_bad(src_pud))
 			continue;
-		if (copy_pmd_range(dst_mm, src_mm, dst_pud, src_pud, vma, addr, next))
+		if (copy_pmd_range(dst_mm, src_mm, dst_pud, src_pud, vma, addr, next,allowed_flags))
 			return -ENOMEM;
 	} while (dst_pud++, src_pud++, addr = next, addr != end);
 	return 0;
 }
 int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
-			struct vm_area_struct *vma, unsigned long addr, unsigned long end) {
+			struct vm_area_struct *vma, unsigned long addr, unsigned long end,pteval_t allowed_flags) {
 	/*Hugetlb.c*/
 	pgd_t *src_pgd, *dst_pgd;
 	unsigned long next;	
@@ -162,7 +205,6 @@ int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 
 	if (is_vm_hugetlb_page(vma)) { /* How does this work with multiple levels ?*/
 		pte_t *src_pte, *dst_pte, entry;
-		struct page *ptepage;
 
 		struct hstate *h = hstate_vma(vma);
 		unsigned long sz = huge_page_size(h);
@@ -171,10 +213,10 @@ int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 			src_pte = huge_pte_offset(src_mm, addr);
 			if (!src_pte)
 				continue;
+			BUG_ON(!huge_pte_none(huge_ptep_get(huge_pte_offset(dst_mm,addr))));
 			dst_pte = huge_pte_alloc(dst_mm, addr, sz);
 			if (!dst_pte)
 				goto nomem;
-
 			/* If the pagetables are shared don't copy or take references */
 			if (dst_pte == src_pte)
 				continue;
@@ -183,28 +225,18 @@ int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 			spin_lock_nested(&src_mm->page_table_lock, SINGLE_DEPTH_NESTING);
 			if (!huge_pte_none(huge_ptep_get(src_pte))) {
 				entry = huge_ptep_get(src_pte);
-				ptepage = pte_page(entry);
-				get_page(ptepage);
-				page_dup_rmap(ptepage);
-				set_huge_pte_at(dst_mm, addr, dst_pte, entry);
+				set_huge_pte_at(dst_mm, addr, dst_pte, entry & allowed_flags);
 			}
 			spin_unlock(&src_mm->page_table_lock);
 			spin_unlock(&dst_mm->page_table_lock);
 		}
 		return 0;
-
-		nomem: return -ENOMEM;
+	
+	nomem: return -ENOMEM;
 	}
 
 	if (unlikely(is_pfn_mapping(vma))) {
 		BUG_ON("unsupported");
-		/*
-		 * We do not free on error cases below as remove_vma
-		 * gets called on error from higher level routine
-		 */
-		ret = track_pfn_vma_copy(vma);
-		if (ret)
-			return ret;
 	}
 	dst_pgd = pgd_offset(dst_mm, addr);
 	src_pgd = pgd_offset(src_mm, addr);
@@ -213,12 +245,78 @@ int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		if (pgd_none_or_clear_bad(src_pgd))
 			continue;
 		if (unlikely(copy_pud_range(dst_mm, src_mm, dst_pgd, src_pgd,
-						vma, addr, next))) {
+						vma, addr, next,allowed_flags))) {
 			ret = -ENOMEM;
 			break;
 		}
 	} while (dst_pgd++, src_pgd++, addr = next, addr != end);
 	return ret;
+}
+#define subset_attr(attr,a,b) \
+		if(attr(a)) 	 	  \
+			continue;		  \
+		if(unlikely(attr(b))) \
+			BUG();
+static int assert_is_pmd_subset(struct mm_struct *src_mm, struct mm_struct *dst_mm,
+			pmd_t *src_pmd,pmd_t *dst_pmd,unsigned long addr, unsigned long end)
+{
+	  pte_t *orig_src_pte, *orig_dst_pte;
+	  pte_t *src_pte, *dst_pte;
+	  spinlock_t *src_ptl, *dst_ptl;
+	  pte_t *orig_src_pte, *orig_dst_pte;
+	   pte_t *src_pte, *dst_pte;
+	   spinlock_t *src_ptl, *dst_ptl;
+
+	  //TODO: on other architectures, this could overwrite
+	   dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+	   if (!dst_pte)
+	     return -ENOMEM;
+	   src_pte = pte_offset_map(src_pmd, addr);
+	   src_ptl = pte_lockptr(src_mm, src_pmd);
+	   spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
+	   orig_src_pte = src_pte;
+	   orig_dst_pte = dst_pte;
+
+	   do {
+		   BUG_ON (src_pte->pte >> PAGE_SHIFT != dst_pte->pte >> PAGE_SHIFT);
+		   BUG_ON (src_pte->pte != src_pte->pte & dst_pte->pte);
+	   }while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
+
+	   spin_unlock(src_ptl);
+	   pte_unmap(orig_src_pte)  ;
+	   pte_unmap_unlock(orig_dst_pte, dst_ptl);
+	   cond_resched();
+	   return 0;
+}
+static int assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct *mm_b){
+	pgd_t *a_pgd, *b_pgd;
+	pud_t *a_pud, *b_pud;
+	pmt_t *a_pmd, *b_pmd;
+	unsigned long addr= 0, next_pgd,next_pud, next_pmd,next_pte;
+	const unsigned long end = TASK_END;
+	a_pgd = pgd_offset(mm_a,addr);
+	b_pgd= pgd_offset(mm_b,addr);
+	do {
+		next_pgd = pgd_addr_end(addr,end);
+		subset_attr(pgd_none_or_clear_bad,a_pgd,b_pgd);
+		a_pud = pud_offset(mm_a,addr);
+		b_pud = pud_offset(mm_b,addr);
+		do{
+			next_pud = pud_addr_end(addr,next_pgd);
+			subset_attr(pud_none_or_clear_bad,a_pud,b_pud);
+			a_pmd = pmd_offset(a_pgd,addr);
+			b_pmd = pmd_offset(b_pgd,addr);
+			do{
+				next_pmd = pmd_addr_end(addr,next_pud);
+				if(pmd_trans_hude(*a_pmd)){
+					BUG_ON(a_pmd->pte >> PAGE_SHIFT != b_pmd->pte >> PAGE_SHIFT);
+					BUG_ON(a_pmd->pte != a_pmd->pte & b_pmd->pte);
+				}
+				subset_attr(pmd_none_or_clear_bad,a_pmd,b_pmd);
+				assert_is_pmd_subset(a_mm,b_mm,a_pmd,b_pmd,addr,next_pmd);
+			}while(a_pmd++,b_pmd++, addr = next_pmd, addr != next_pud);
+		} while(a_pud++,b_pud++, addr = next_pud, addr != next_pgd);
+	} while(a_pgd++, b_pgd++, addr = next_pgd, addr < end);
 }
 void elfp_os_invalidate_clones(struct mm_struct *mm,
 			unsigned long start, unsigned long end){
@@ -295,22 +393,26 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end, unsigned short type){
   /* FIXME: Implement support for type */
-	/* down_write(&from->mmap_sem);*/
 	int retval;
 	struct vm_area_struct *mpnt;
-	mpnt = find_vma(from->mm,start);
-	if(unlikely(!mpnt) || mpnt->vm_start > end) /* Start not mapped */
-	{
-		retval=-EINVAL;
-		goto out;
+	pgprot_t prot;
+	pte_t prohibited;
+	if(!(type & ELFP_RW_R))
+		return;
+	if(type&ELFP_RW_W){
+
 	}
-	if(mpnt->vm_start < start)
-		split_vma(from->mm,mpnt,start,1);
-	if(mpnt->vm_end > end)
-		split_vma(from->mm,mpnt,end,0);
-	BUG_ON(mpnt->vm_start < start || mpnt->vm_end  > end);
-	copy_page_range_dumb(to,from->mm,mpnt,start,end);
-	//up_write(&from->mm->mmap_sem);
+	while(start < end){
+		assert_is_pmd_subset(to,from);
+		mpnt = find_vma(from->mm,start);
+		if(unlikely(!mpnt) || mpnt->vm_start > end) /* Start not mapped */
+		{
+			retval=-EINVAL;
+			goto out;
+		}
+		copy_page_range_dumb(to,from->mm,mpnt,start,end);
+		start=mpnt->vm_end;
+	}
 out:	return retval;
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){

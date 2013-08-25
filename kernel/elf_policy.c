@@ -283,7 +283,10 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
 			  data->high = buf.addr1 + buf.addr2;
 			else 
 			  data->high = buf.addr2;
-			if(data->high <= data->low){
+                        //TODO: warn user that the policy is not aligned
+                        data->low &= PAGE_MASK; // round 
+                        data->high = (data->high + PAGE_SIZE - 1 ) & PAGE_MASK;
+			if(data->high <= data->low){ 
                           elfp_os_errormsg("Invalid range %p - %p in ELF policy transition \n",data->low, data->high);
 			  return -EINVAL;
                         }
