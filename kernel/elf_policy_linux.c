@@ -434,23 +434,21 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end, unsigned short type){
   /* FIXME: Implement support for type */
-	int retval;
+	int retval = -EINVAL;
 	struct vm_area_struct *mpnt;
-	if(!(type & ELFP_RW_READ))
+	if(!(type & ELFP_RW_READ)) // TODO: Warn - 
 		return -EINVAL;
 	while(start < end){
 		mpnt = find_vma(from->mm,start);
 		if(unlikely(!mpnt) || mpnt->vm_start > end) /* Start not mapped */
-		{
-			retval=-EINVAL;
-			goto out;
-		}
+                  break;
 		assert_is_pagetable_subset(to,from->mm);
 		copy_page_range_dumb(to,from->mm,mpnt,start,end,!(type&ELFP_RW_WRITE), !(type&ELFP_RW_EXEC));
 		assert_is_pagetable_subset(to,from->mm);
 		start=mpnt->vm_end;
+                retval = 0; // We made some progress
 	}
-out:	return retval;
+	return retval;
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
 	int have_mmu_notifier = 1;
