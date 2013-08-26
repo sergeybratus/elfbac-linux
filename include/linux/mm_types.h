@@ -263,7 +263,7 @@ struct vm_area_struct {
 	struct mempolicy *vm_policy;	/* NUMA policy for the VMA */
 #endif
 #ifdef CONFIG_ELF_POLICY
-	struct vm_area_struct *elfp_clone_next;
+        unsigned long elfp_tag;
 #endif
 };
 

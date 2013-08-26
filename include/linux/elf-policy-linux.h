@@ -21,6 +21,7 @@ typedef atomic_t elfp_atomic_ctr_t;
 typedef struct pt_regs* elfp_intr_state_t;
 typedef struct rb_node elfp_tree_node;
 typedef struct rb_root elfp_tree_root;
+typedef struct vm_area_struct *elfp_os_mapping;
 #ifdef CONFIG_X86_64
 typedef unsigned long elfp_os_stack; //Stack pointer
 #endif
@@ -52,6 +53,9 @@ int elfp_policy_get_refcount(struct elf_policy *policy);
 static inline size_t elfp_read_policy(uintptr_t off, void *outbuf,size_t size,elfp_process_t *tsk){
 	memcpy (outbuf,(void *)off,size);
 	return size; /* memcpy doesn't fail */
+}
+static inline unsigned long elfp_os_mapping_tag(elfp_os_mapping map){
+  return map->elfp_tag;
 }
 void elfp_os_free_context(elfp_context_t *context);
 static inline void elfp_os_atomic_init(elfp_atomic_ctr_t *p,int val){

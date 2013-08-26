@@ -18,9 +18,9 @@ struct elfp_call_transition *elfp_os_find_call_transition(struct elfp_state *sta
   return NULL;
 }
 int elfp_handle_instruction_address_fault(uintptr_t address,
-                                          elfp_process_t *tsk,elfp_intr_state_t regs) {
+                                          elfp_process_t *tsk,elfp_os_mapping map,elfp_intr_state_t regs) {
   struct elfp_state *state = elfp_task_get_current_state(tsk);
-  int retval = elfp_handle_data_address_fault(address,tsk,ELFP_RW_EXEC,regs);
+  int retval = elfp_handle_data_address_fault(address,tsk,ELFP_RW_EXEC,map,regs);
   if (retval)  /* Handle an instruction fetch that hasn't been
                   ported yet */
     return retval;
@@ -53,13 +53,13 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
   elfp_os_change_context(tsk,transition->to,regs);/* TODO: Copy stack, handle return */
   return 1;
 }
-struct elfp_data_transition *elfp_os_find_data_transition(struct elfp_state *state,uintptr_t address){
+struct elfp_data_transition *elfp_os_find_data_transition(struct elfp_state *state,unsigned long tag){
   elfp_tree_node *node = state->data.rb_node;
   while(node){
     struct elfp_data_transition *transition = container_of(node,struct elfp_data_transition,tree);
-    if(address < transition->low)
+    if(tag < transition->tag)
       node=node->rb_left;
-    else if(address > transition->high)
+    else if(tag > transition->tag)
       node=node->rb_right;
     else 
       return transition;
@@ -67,13 +67,13 @@ struct elfp_data_transition *elfp_os_find_data_transition(struct elfp_state *sta
   return NULL;
 }
 /* TODO handle overlapping, etc with only different accesses */
-int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int access_type,elfp_intr_state_t regs){
+int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int access_type,elfp_os_mapping map,elfp_intr_state_t regs){
   struct elfp_state *state = elfp_task_get_current_state(tsk);
-  struct elfp_data_transition *transition = elfp_os_find_data_transition(state,address);
+  struct elfp_data_transition *transition = elfp_os_find_data_transition(state,elfp_os_mapping_tag(map));
   if(transition && transition->type & access_type){
     if(state == transition->to){ /* This will be forever
                                     allowed -> map permanently */
-      if(!elfp_os_copy_mapping(tsk,state->context, transition->low, transition->high,transition->type))
+      if(!elfp_os_copy_mapping(tsk,state->context, map,transition->type))
         return 1;
     }
     else{
@@ -100,7 +100,7 @@ inline int elfp_read_safe(uintptr_t start,uintptr_t end, uintptr_t offset, size_
   }
   return 0;
  err:
-  elfp_os_errormsg("ELFBAC: Could not read %u bytes from userspace offset %p \n",s,start+offset);
+  elfp_os_errormsg("ELFBAC: Could not read %lu bytes from userspace offset %p \n",s,(void*)(start+offset));
   return -1;
 }
 /*Insert into btree*/
@@ -109,11 +109,10 @@ static int elfp_insert_data_transition(struct elfp_data_transition *data){
   
   while(*new){
     struct elfp_data_transition *transition = container_of(*new,struct elfp_data_transition,tree);
-    uintptr_t address = data->low;
     parent = *new;
-    if(address < transition->low)
+    if(data->tag < transition->tag)
       new=&((*new)->rb_left);
-    else if(address > transition->high)
+    else if(data->tag > transition->tag)
       new=&((*new)->rb_right);
     else 
       return -EINVAL;
@@ -144,15 +143,6 @@ static int elfp_insert_call_transition(struct elfp_call_transition *data){
 /*FIXME: Add a btree for this !*/
 static struct elfp_state *elfp_find_state_by_id(struct elf_policy * pol, elfp_id_t id){
   struct elfp_state *retval = pol->states;
-  while(retval && id!=retval->id)
-    retval = retval->next;
-  if(retval)
-    return retval;
-  else
-    return NULL;
-}
-static struct elfp_stack *elfp_find_stack_by_id(struct elf_policy *pol, elfp_id_t id){
-  struct elfp_stack *retval = pol->stacks;
   while(retval && id!=retval->id)
     retval = retval->next;
   if(retval)
@@ -198,34 +188,13 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
           if (elfp_read_safe(start, end,off, sizeof buf, &buf,tsk))
             return -EIO;
           off += sizeof buf;
-          //state->codelow = buf.low;
-          //state->codehigh = buf.high;
           state->id = buf.id;
           state->policy = pol;
           state->calls = RB_ROOT;
           state->data = RB_ROOT;
           state->context = elfp_os_context_new(tsk);
-          state->stack = NULL;
           if(!state->context)
             return -ENOMEM;
-          //elfp_os_copy_mapping(tsk, state->context,buf.low,buf.high);
-          break;
-        }
-      case ELFP_CHUNK_STACK:
-        {
-          struct elfp_desc_stack buf;
-          struct elfp_stack *stack;
-          if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk))
-            return -EIO;
-          off += sizeof buf;
-          stack = elfp_os_alloc_stack(tsk,buf.size);
-          stack->id = buf.id;
-          if(!stack)
-            return -ENOMEM;
-          if(pol->stacks)
-            pol->stacks->prev = stack;
-          stack->next = pol->stacks;
-          pol->stacks = stack;
           break;
         }
       case ELFP_CHUNK_CALL:
@@ -262,74 +231,39 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
         }
       case ELFP_CHUNK_DATA:
         {
-          struct elfp_desc_data buf;
-          struct elfp_data_transition *data = elfp_alloc_data_transition();
-          if(!data)
-            return -ENOMEM;
+          struct elfp_desc_access buf;
+          struct elfp_data_transition *data;
           if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk))
             return -EIO;
           off += sizeof buf;
-
+          data = elfp_alloc_data_transition();
+          if(!data)
+            return -ENOMEM;
+          
           data->from = elfp_find_state_by_id(pol,buf.from);
           if(!data->from){
             elfp_os_errormsg("ELF policy transition referencing unknown source state %d\n",buf.from);
+            elfp_free_data_transition(data);
             return -EINVAL;
           }
           data->to = elfp_find_state_by_id(pol,buf.to);
           if(!data->to){
             elfp_os_errormsg("ELF policy transition referencing unknown target state %d\n",buf.to);
+            elfp_free_data_transition(data);
             return -EINVAL;
-          }
-          data->low = buf.addr1;
+          }          
+          data->tag = buf.tag;
           data->type = buf.type;
-          if(data->type & ELFP_RW_SIZE)
-            data->high = buf.addr1 + buf.addr2;
-          else 
-            data->high = buf.addr2;
-          //TODO: warn user that the policy is not aligned
-          data->low &= PAGE_MASK; // round 
-          data->high = (data->high + PAGE_SIZE - 1 ) & PAGE_MASK;
-          if(data->high <= data->low){ 
-            elfp_os_errormsg("Invalid range %p - %p in ELF policy transition \n",data->low, data->high);
-            return -EINVAL;
-          }
-          retval = elfp_insert_data_transition(data);
-          if(retval)
-            return retval;
+          elfp_insert_data_transition(data);
           break;
-        }
-      case ELFP_CHUNK_STACKACCESS:
+        } 
+      case ELFP_CHUNK_TAG:
         {
-          struct elfp_desc_stackaccess buf;
-          struct elfp_data_transition *data = elfp_alloc_data_transition();
-          struct elfp_stack *stack;
-          if(!data)
-            return -ENOMEM;
-          if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk)){
-            elfp_free_data_transition(data);
+          struct elfp_desc_static_tag buf;
+          if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk))
             return -EIO;
-          }
           off += sizeof buf;
-          stack =  elfp_find_stack_by_id(pol,buf.stack);
-          if(!stack){
-            elfp_free_data_transition(data);
-            elfp_os_errormsg("Stack not found\n");
-            return -EIO;
-          }
-          data->type = buf.type & (~ELFP_RW_EXEC);
-          data->from = elfp_find_state_by_id(pol,buf.from);
-          if(!data->from){
-            return -EINVAL;
-          }
-          data->to = elfp_find_state_by_id(pol,buf.to);
-          if(!data->to){
-            return -EINVAL;
-          }
-          data->low = stack->low;
-          data->high = stack->high;
-          retval = elfp_insert_data_transition(data);
-          if(retval)
-            return retval;
+          elfp_os_tag_memory(tsk,buf.begin, buf.begin + buf.size,buf.tag);
           break;
         }
       default:
@@ -389,7 +323,7 @@ int elfp_print_policy(struct elf_policy *policy,struct elfp_state *cur){
     struct rb_node *iter;
     for(iter=rb_first(&state->data);iter; iter=rb_next(iter)){
       struct elfp_data_transition *pp = container_of(iter,struct elfp_data_transition,tree);
-      elfp_os_errormsg("\t %d->%d data\t%lx\t%lx\t%x]\n",pp->from->id,pp->to->id,pp->low,pp->high,pp->type);
+      elfp_os_errormsg("\t %d->%d data\t%ld\t%x\n",pp->from->id,pp->to->id,pp->tag,pp->type);
     }  
     for(iter = rb_first(&state->calls);iter;iter=rb_next(iter)){
       struct elfp_call_transition *pp = container_of(iter,struct elfp_call_transition,tree);

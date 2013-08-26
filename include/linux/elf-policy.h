@@ -37,8 +37,8 @@
 #define ELFP_CHUNK_STATE 1
  #define ELFP_CHUNK_CALL 2
  #define ELFP_CHUNK_DATA 3
-#define ELFP_CHUNK_STACK 4
-#define ELFP_CHUNK_STACKACCESS 5
+#define ELFP_CHUNK_TAG 4
+
  #pragma pack(push,1)
  struct elfp_desc_header{
 	 uint32_t chunkcount;
@@ -56,17 +56,23 @@ struct   elfp_desc_state{
 #define ELFP_RW_READ (1u << 0)
 #define ELFP_RW_WRITE (1u << 1)
 #define ELFP_RW_EXEC  (1u << 2)
-#define ELFP_RW_SIZE (1u << 3)
 
-struct elfp_desc_data{
+
+struct elfp_desc_static_tag{
   elfp_chunk_header_t chunktype;
-  uintptr_t addr1; /*The start of the address range*/
-  uintptr_t addr2; /*The size of the address range if  ELFP_RW_SIZE is set, otherwise the end of the address range*/
-  elfp_id_t from;
-  elfp_id_t to;
-  uint32_t type;
+  unsigned long tag;
+  unsigned long begin; /*The start of the address range*/
+  unsigned long size; /*The size of the address range if  ELFP_RW_SIZE is set, otherwise the end of the
+                     address range*/
 }__attribute__ ((__packed__));
 
+struct elfp_desc_access{
+  elfp_chunk_header_t chunktype;
+  elfp_id_t from;
+  elfp_id_t to;
+  unsigned long tag;
+  unsigned int type;
+} __attribute__((__packed__));
 struct elfp_desc_call{
 	  elfp_chunk_header_t chunktype;
 	elfp_id_t from;
@@ -75,13 +81,7 @@ struct elfp_desc_call{
 	int16_t parambytes;
 	int16_t returnbytes;
 }__attribute__ ((__packed__));
-struct elfp_desc_stackaccess{
-  elfp_chunk_header_t chunktype;
-  elfp_id_t from;
-  elfp_id_t to;
-  elfp_id_t stack;
-  uint32_t type;
-};
+
 #pragma pack(pop)
 #ifdef __KERNEL__
 struct elfp;
@@ -96,7 +96,7 @@ struct elfp_data_transition;
 
 struct elf_policy{
   struct elfp_state *states;
-  struct elfp_stack *stacks;
+
   elfp_atomic_ctr_t refs; /*should be made atomic_t */
 };
 struct elfp_state {
@@ -106,15 +106,8 @@ struct elfp_state {
   elfp_tree_root data;
   struct elfp_state *prev,*next; /* Linked list of states */
   struct elf_policy *policy; /* Policy this state belongs to */
-  struct elfp_stack *stack; /* Last call transition taken */
   elfp_id_t id; /* id of this state in the policy. Used for parsing
                    policy statements */
-};
-struct elfp_stack {
-  struct elfp_stack *prev,*next;
-  elfp_id_t id;
-  uintptr_t low,high;
-  elfp_os_stack os;
 };
 struct elfp_call_transition{
   elfp_tree_node tree; /* Wraps OS rb-tree implementation*/
@@ -127,32 +120,30 @@ struct elfp_call_transition{
 struct elfp_data_transition {
   elfp_tree_node tree;
   struct elfp_state *from,*to;
-  uintptr_t low, high;
+  unsigned long tag; 
   unsigned short type; /* READ / WRITE flags */
 };
-/* How to handle returns? */
 struct elfp_stack_frame{ 
   struct elfp_call_transition *trans;
   struct elfp_stack_frame *down;
   uintptr_t ret_offset;
   int returnbytes;
 };
+
 typedef struct pt_regs elfp_intr_state;
 /* OS primitives*/
 extern int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *context,elfp_intr_state_t regs);
-extern int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end,unsigned short type);
-extern int elfp_os_copy_stack_bytes(struct elfp_stack *from,struct elfp_stack *to,size_t nbytes,elfp_intr_state_t regs);
+extern int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, elfp_os_mapping map,unsigned short type);
+extern int elfp_os_tag_memory(elfp_process_t *tsk, unsigned long start, unsigned long end,unsigned long tag);
+//extern int elfp_os_copy_stack_bytes(struct elfp_stack *from,struct elfp_stack *to,size_t nbytes,elfp_intr_state_t regs);
 // extern int elfp_os_errormsg(char *message);
 extern elfp_context_t * elfp_os_context_new(elfp_process_t *tsk);
-struct elfp_stack * elfp_os_alloc_stack(elfp_process_t *tsk, size_t size);
-int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack,elfp_intr_state_t regs);
-int elfp_os_free_stack(elfp_process_t *tsk,struct elfp_stack *stack);
 
 /* VM hooks */
 extern int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_intr_state_t regs);
 extern int elfp_destroy_policy(struct elf_policy *policy);
-extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk,elfp_intr_state_t regs);
-extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk,int access_type,elfp_intr_state_t regs);
+extern int elfp_handle_instruction_address_fault(uintptr_t address,elfp_process_t *tsk,elfp_os_mapping map,elfp_intr_state_t regs);
+extern int elfp_handle_data_address_fault(uintptr_t address,elfp_process_t *tsk,int access_type,elfp_os_mapping map,elfp_intr_state_t regs);
 
 
 int elfp_print_policy(struct elf_policy *pol,struct elfp_state *cur);

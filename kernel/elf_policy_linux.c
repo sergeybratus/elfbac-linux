@@ -41,7 +41,7 @@
 
 #include <linux/elf-policy.h>
 static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct *mm_b);
-struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack,*elfp_slab_stack_frame;
+struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack_frame;
 
 void __init elfp_init(void) {
 	elfp_slab_state =  kmem_cache_create("elfp_state",
@@ -52,7 +52,7 @@ void __init elfp_init(void) {
 			sizeof(struct elfp_call_transition), 0, 0, NULL);
 	elfp_slab_data_transition =  kmem_cache_create("elfp_policy_data_transition",
 			sizeof(struct elfp_data_transition), 0, 0, NULL);
-	elfp_slab_stack = kmem_cache_create("elfp_stack",sizeof(struct elfp_state),0,0,NULL);
+        //	elfp_slab_stack = kmem_cache_create("elfp_stack",sizeof(struct elfp_state),0,0,NULL);
 	elfp_slab_stack_frame = kmem_cache_create("elfp_stack_frame",sizeof(struct elfp_stack_frame),0,0,NULL);
 }
 static void elfp_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
@@ -383,37 +383,7 @@ static const struct mmu_notifier_ops elfp_mmu_notifier_ops = {
 struct mmu_notifier elfp_mmu_notifier = {
 	.ops = &elfp_mmu_notifier_ops,
 };
-struct elfp_stack * elfp_os_alloc_stack(elfp_process_t *tsk, size_t size){
-	struct elfp_stack *retval = kmem_cache_alloc(elfp_slab_stack,GFP_KERNEL);
-	down_write(&tsk->mm->mmap_sem);
-	if(!retval) goto err;
-	retval->low = do_mmap(NULL,0,size,PROT_READ|PROT_WRITE,MAP_ANONYMOUS,0);
-	if(!retval->low) goto err_mmap;
-	retval->high = retval->low + size;
-// TODO: support stack growing up!
-	retval->os = retval->high;
-	retval->prev = retval->next = NULL;
-	up_write(&tsk->mm->mmap_sem);
-	return retval;
- err_mmap:
-	kmem_cache_free(elfp_slab_stack,retval);
-	err:
-	up_write(&tsk->mm->mmap_sem);
-	return NULL;
-}
-int elfp_os_free_stack(elfp_process_t *tsk,struct elfp_stack *stack){
-        BUG_ON(do_munmap(tsk->mm,stack->low,stack->high - stack->low));
-	kmem_cache_free(elfp_slab_stack,stack);
-	return 0;
-}
-int elfp_os_change_stack(elfp_process_t *tsk, struct elfp_stack *stack,elfp_intr_state_t regs){
-	/*
-	elfp_task_get_current_state(tsk)->stack->os = regs->sp;
-	regs->sp = stack->os;
-	this_cpu_write(old_rsp, stack->os);
-	*/
-	return 0;
-}
+
 int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_intr_state_t regs){
 	struct mm_struct *oldmm = tsk->elf_policy_mm;
 	if(tsk != current){
@@ -424,32 +394,44 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 	//local_irq_disable();
 	tsk->elfp_current = state;
 	tsk->elf_policy_mm = state->context;
-	if(state->stack){
-	  elfp_os_change_stack(tsk,state->stack,regs);
-	 }
+        //	if(state->stack){
+	//  elfp_os_change_stack(tsk,state->stack,regs);
+	// }
 	switch_mm(oldmm,tsk->elf_policy_mm,tsk);
 	//local_irq_enable();
 	spin_unlock(&(tsk->alloc_lock));
 	return 0;
 }
-int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t start, uintptr_t end, unsigned short type){
+int elfp_os_tag_memory(elfp_process_t *tsk, unsigned long start, unsigned long end,unsigned long tag){
+  struct vm_area_struct *mpnt;
+  start&= PAGE_MASK; // round 
+  end = (end + PAGE_SIZE - 1 ) & PAGE_MASK;
+  down_write(&tsk->mm->mmap_sem);
+  while(start < end){
+    mpnt = find_vma(tsk->mm,start);
+    if(unlikely(!mpnt) || mpnt->vm_start > end)
+      break;
+    if(mpnt->vm_start < start)
+      split_vma(tsk->mm,mpnt,start,1);
+
+    if(mpnt->vm_end > end)
+      split_vma(tsk->mm,mpnt,end,0);
+    BUG_ON(mpnt->elfp_tag != 0);
+    mpnt->elfp_tag  = tag;
+  }
+  up_write(&tsk->mm->mmap_sem);
+  return 0;
+}
+int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping map, unsigned short type){
   /* FIXME: Implement support for type */
-	int retval = -EINVAL;
-	struct vm_area_struct *mpnt;
-	if(!(type & ELFP_RW_READ)) // TODO: Warn - 
-		return -EINVAL;
-	while(start < end){
-		mpnt = find_vma(from->mm,start);
-		if(unlikely(!mpnt) || mpnt->vm_start > end) /* Start not mapped */
-                  break;
-		assert_is_pagetable_subset(to,from->mm);
-                start = max(mpnt->vm_start, start);
-		copy_page_range_dumb(to,from->mm,mpnt,start,min(mpnt->vm_end,end),!(type&ELFP_RW_WRITE), !(type&ELFP_RW_EXEC));
-		assert_is_pagetable_subset(to,from->mm);
-		start=mpnt->vm_end;
-                retval = 0; // We made some progress
-	}
-	return retval;
+  
+  BUG_ON(map->vm_mm!= from->mm);
+  if(!(type & ELFP_RW_READ)) // TODO: Warn - 
+    return -EINVAL;
+  assert_is_pagetable_subset(to,from->mm);
+  copy_page_range_dumb(to,from->mm,map,map->vm_start,map->vm_end,!(type&ELFP_RW_WRITE), !(type&ELFP_RW_EXEC));
+  assert_is_pagetable_subset(to,from->mm);
+  return 0;
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
 	int have_mmu_notifier = 1;
@@ -458,14 +440,12 @@ void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct 
 	else
 		have_mmu_notifier = 0;
 	if(initialstate->policy != policy)
-		panic("ELF policy initial state doesn't belong to policy. Logic error\n");
+		BUG_ON("ELF policy initial state doesn't belong to policy. Logic error\n");
 
 	tsk->elf_policy = policy;
 	tsk->elf_policy_mm = tsk->active_mm;
 	tsk->elfp_current = initialstate;
 	elfp_os_change_context(tsk,initialstate,regs);
-//	if(!have_mmu_notifier)
-//		mmu_notifier_register(&elfp_mmu_notifier,tsk->mm);
 	atomic_inc(&(policy->refs));
 }
 void elfp_os_free_context(elfp_context_t *context){

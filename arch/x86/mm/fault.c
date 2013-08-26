@@ -1181,30 +1181,23 @@ retry:
 good_area:/* The faulting address is mapped in tsk->mm*/
 #ifdef CONFIG_ELF_POLICY
 	if(likely(tsk->elf_policy_mm) && likely(tsk->elf_policy)) {
-		if(is_access_ok(tsk->mm,address,error_code)){ /* maybe
-                                                                 we
-	 * need to fix the fault in the original mapping first*/
-#if 0
-			unsigned long addr_base = address & PAGE_MASK;
-			elfp_os_copy_mapping(tsk, tsk->elf_policy_mm, addr_base, addr_base + PAGE_SIZE,0);
-#else
+		if(is_access_ok(tsk->mm,address,error_code)){
 			if (error_code & PF_INSTR) {
-				if (elfp_handle_instruction_address_fault(address, tsk,regs)) 
+                          if (elfp_handle_instruction_address_fault(address, tsk,vma,regs)) 
 					goto out;
 				else{
-					printk(KERN_ERR "Killing process because of ELFBAC instruction fetch from %p\n",address);
+                                  printk(KERN_ERR "Killing process because of ELFBAC instruction fetch from %p\n",(void *)address);
 					goto bad_area;
 				}
 			} else {
 				if (elfp_handle_data_address_fault(address, tsk, (error_code
-										  & PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ,regs))
+										  & PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ,vma,regs))
 					goto out;
 				else{
-					printk(KERN_ERR "Killing process because of ELFBAC data fetch from %p\n",address);
+                                  printk(KERN_ERR "Killing process because of ELFBAC data fetch from %p\n",(void *)address);
 					goto bad_area;
 				}
 			}
-#endif
 		}
 	}
 #endif
