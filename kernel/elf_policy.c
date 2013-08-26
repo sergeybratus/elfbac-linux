@@ -162,6 +162,7 @@ static struct elfp_stack *elfp_find_stack_by_id(struct elf_policy *pol, elfp_id_
 }
 /*FIXME: Memory leaks with failures */
 int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_intr_state_t regs){
+  int retval;
   uintptr_t end = start +size;
   struct elf_policy *pol;
   struct elfp_desc_header hdr;
@@ -254,7 +255,9 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
             elfp_os_errormsg("ELF call chunk invalid-> Offset not in target state\n");
             return -EINVAL;
             }*/
-          elfp_insert_call_transition(data);
+          retval = elfp_insert_call_transition(data);
+          if(retval)
+            return retval;
           break;
         }
       case ELFP_CHUNK_DATA:
@@ -290,7 +293,9 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
             elfp_os_errormsg("Invalid range %p - %p in ELF policy transition \n",data->low, data->high);
             return -EINVAL;
           }
-          elfp_insert_data_transition(data);
+          retval = elfp_insert_data_transition(data);
+          if(retval)
+            return retval;
           break;
         }
       case ELFP_CHUNK_STACKACCESS:
@@ -322,7 +327,9 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
           }
           data->low = stack->low;
           data->high = stack->high;
-          elfp_insert_data_transition(data);
+          retval = elfp_insert_data_transition(data);
+          if(retval)
+            return retval;
           break;
         }
       default:
