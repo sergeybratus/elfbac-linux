@@ -71,16 +71,13 @@ int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
   spinlock_t *src_ptl, *dst_ptl;
 
  //TODO: on other architectures, this could overwrite. The whole map idea is semi-idiotic
-  dst_pte = pte_offset_map(dst_pmd,addr);
-  if(pte_none(*dst_pte)){
-	  dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
-	  if (!dst_pte)
-		  return -ENOMEM;
-  }
-  else{
-	  dst_ptl = pte_lockptr(dst_mm,dst_pmd);
-	  spin_lock(dst_ptl);
-  }
+  //  dst_pte = pte_offset_map(dst_pmd,addr);
+  //  if(pte_none(*dst_pte)){
+  dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
+  if (!dst_pte)
+    return -ENOMEM;
+  //  }
+
   src_pte = pte_offset_map(src_pmd, addr);
   src_ptl = pte_lockptr(src_mm, src_pmd);
   spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
@@ -178,12 +175,12 @@ static inline int copy_pmd_range(struct mm_struct *dst_mm,
 		struct vm_area_struct *vma, unsigned long addr, unsigned long end,int drop_write,int drop_exec) {
 	pmd_t *src_pmd, *dst_pmd;
 	unsigned long next;
-	dst_pmd = pmd_offset(dst_pud,addr);
-	if(pmd_none(*dst_pmd)){
-		dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
-		if (!dst_pmd)
-			return -ENOMEM;
-	}
+	//dst_pmd = pmd_offset(dst_pud,addr);
+	//if(pmd_none(*dst_pmd)){
+        dst_pmd = pmd_alloc(dst_mm, dst_pud, addr);
+        if (!dst_pmd)
+          return -ENOMEM;
+	//}
 	src_pmd = pmd_offset(src_pud, addr);
 	do {
 		next = pmd_addr_end(addr, end);
@@ -213,12 +210,12 @@ static inline int copy_pud_range(struct mm_struct *dst_mm,
 		int drop_write,int drop_exec) {
 	pud_t *src_pud, *dst_pud;
 	unsigned long next;
-	dst_pud = pud_offset(dst_pgd,addr);
-	if(pud_none(*dst_pud)){
-		dst_pud = pud_alloc(dst_mm, dst_pgd, addr);
-		if (!dst_pud)
-			return -ENOMEM;
-	}
+        //	dst_pud = pud_offset(dst_pgd,addr);
+        //	if(pud_none(*dst_pud)){
+        dst_pud = pud_alloc(dst_mm, dst_pgd, addr);
+        if (!dst_pud)
+          return -ENOMEM;
+        //	}
 	src_pud = pud_offset(src_pgd, addr);
 	do {
 		next = pud_addr_end(addr, end);
@@ -407,18 +404,16 @@ int elfp_os_tag_memory(elfp_process_t *tsk, unsigned long start, unsigned long e
   start&= PAGE_MASK; // round 
   end = (end + PAGE_SIZE - 1 ) & PAGE_MASK;
   down_write(&tsk->mm->mmap_sem);
-  while(start < end){
-    mpnt = find_vma(tsk->mm,start);
-    if(unlikely(!mpnt) || mpnt->vm_start > end)
-      break;
-    if(mpnt->vm_start < start)
-      split_vma(tsk->mm,mpnt,start,1);
-
-    if(mpnt->vm_end > end)
-      split_vma(tsk->mm,mpnt,end,0);
-    BUG_ON(mpnt->elfp_tag != 0);
-    mpnt->elfp_tag  = tag;
-  }
+  mpnt = find_vma(tsk->mm,start);
+  if(unlikely(!mpnt) || mpnt->vm_start > end)
+    return -EINVAL;
+  if(mpnt->vm_start < start)
+    split_vma(tsk->mm,mpnt,start,1);
+  
+  if(mpnt->vm_end > end)
+    split_vma(tsk->mm,mpnt,end,0);
+  BUG_ON(mpnt->elfp_tag != 0);
+  mpnt->elfp_tag  = tag;
   up_write(&tsk->mm->mmap_sem);
   return 0;
 }
@@ -427,7 +422,10 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping
   
   BUG_ON(map->vm_mm!= from->mm);
   if(!(type & ELFP_RW_READ)) // TODO: Warn - 
-    return -EINVAL;
+    {
+      elfp_os_errormsg(KERN_ERR "Need to allow read in every data access \n");
+      return -EINVAL;
+    }
   assert_is_pagetable_subset(to,from->mm);
   copy_page_range_dumb(to,from->mm,map,map->vm_start,map->vm_end,!(type&ELFP_RW_WRITE), !(type&ELFP_RW_EXEC));
   assert_is_pagetable_subset(to,from->mm);

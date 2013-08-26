@@ -263,7 +263,9 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
           if(elfp_read_safe(start,end,off,sizeof buf,&buf,tsk))
             return -EIO;
           off += sizeof buf;
-          elfp_os_tag_memory(tsk,buf.begin, buf.begin + buf.size,buf.tag);
+          retval = elfp_os_tag_memory(tsk,buf.begin, buf.begin + buf.size,buf.tag);
+          if(retval)
+            return retval;
           break;
         }
       default:
