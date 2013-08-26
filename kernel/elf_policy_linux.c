@@ -443,7 +443,8 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to, uintptr_t star
 		if(unlikely(!mpnt) || mpnt->vm_start > end) /* Start not mapped */
                   break;
 		assert_is_pagetable_subset(to,from->mm);
-		copy_page_range_dumb(to,from->mm,mpnt,start,end,!(type&ELFP_RW_WRITE), !(type&ELFP_RW_EXEC));
+                start = max(mpnt->vm_start, start);
+		copy_page_range_dumb(to,from->mm,mpnt,start,min(mpnt->vm_end,end),!(type&ELFP_RW_WRITE), !(type&ELFP_RW_EXEC));
 		assert_is_pagetable_subset(to,from->mm);
 		start=mpnt->vm_end;
                 retval = 0; // We made some progress
