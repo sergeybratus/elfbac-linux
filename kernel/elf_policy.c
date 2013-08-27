@@ -32,6 +32,7 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
     ELFP_TASK_STACKPTR(tsk) = stack->down;
     elfp_os_change_context(tsk,stack->trans->from,regs);
     elfp_free_stack_frame(stack);
+    return 1;
   }
   transition = elfp_os_find_call_transition(state,address);
   if(!transition)

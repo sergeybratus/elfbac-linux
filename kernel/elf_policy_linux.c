@@ -486,7 +486,13 @@ elfp_context_t * elfp_os_context_new(struct task_struct *tsk){
 	return mm;
 }
 uintptr_t elfp_os_ret_offset(elfp_intr_state_t regs,uintptr_t ip){
-  return regs->ax; /* X86-64 stores return address in RAX*/
+  /* this trusts that the 'caller' has given a correct return address. However, all that the
+     attacker can get is a return to this state - we do not grant any implicit access based on
+     'return transitions' */ 
+  /*TODO: remove arch specific code*/
+  unsigned long stack_top;
+  get_user(stack_top, (unsigned long *)regs->sp);
+  return stack_top;
 }
 
 
