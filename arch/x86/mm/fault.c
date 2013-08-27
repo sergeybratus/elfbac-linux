@@ -1186,7 +1186,7 @@ good_area:/* The faulting address is mapped in tsk->mm*/
                           if (elfp_handle_instruction_address_fault(address, tsk,vma,regs)) 
 					goto out;
 				else{
-                                  printk(KERN_ERR "Killing process because of ELFBAC instruction fetch from %p\n",(void *)address);
+                                  printk(KERN_ERR "Killing process because of ELFBAC instruction fetch from %p [tag %lx, state %d]\n",(void *)address,vma->elfp_tag,tsk->elfp_current->id);
 					goto bad_area;
 				}
 			} else {
@@ -1194,7 +1194,7 @@ good_area:/* The faulting address is mapped in tsk->mm*/
 										  & PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ,vma,regs))
 					goto out;
 				else{
-                                  printk(KERN_ERR "Killing process because of ELFBAC data fetch from %p\n",(void *)address);
+                                  printk(KERN_ERR "Killing process because of ELFBAC data fetch from %p [tag %lx, state %d]\n",(void *)address,vma->elfp_tag, tsk->elfp_current->id);
 					goto bad_area;
 				}
 			}

@@ -292,14 +292,16 @@ int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	return ret;
 }
 #define subset_attr(attr,a,b,out) \
-		if(attr(a)) 	 	  \
+		if(!attr(a)) 	 	  \
 			out;		  \
-		if(unlikely(attr(b))) \
+		if(unlikely(!attr(b))) \
 			BUG();
 static void assert_pte_subset(pte_t *a,pte_t *b){
-	subset_attr(pte_exec,*a,*b,return);
-	subset_attr(pte_write,*a,*b,return);
-	BUG_ON (pte_pfn(*a) != pte_pfn(*b));
+  if(pte_none(*a))
+    return;
+  subset_attr(pte_exec,*a,*b,return);
+  subset_attr(pte_write,*a,*b,return);
+  BUG_ON (pte_pfn(*a) != pte_pfn(*b));
 }
 static void assert_is_pmd_subset(struct mm_struct *src_mm, struct mm_struct *dst_mm,
 			pmd_t *src_pmd,pmd_t *dst_pmd,unsigned long addr, unsigned long end)
@@ -336,12 +338,12 @@ static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct 
 	b_pgd= pgd_offset(mm_b,addr);
 	do {
 		next_pgd = pgd_addr_end(addr,end);
-		subset_attr(pgd_none_or_clear_bad,a_pgd,b_pgd,continue);
+		subset_attr(!pgd_none,*a_pgd,*b_pgd,continue);
 		a_pud = pud_offset(a_pgd,addr);
 		b_pud = pud_offset(b_pgd,addr);
 		do{
 			next_pud = pud_addr_end(addr,next_pgd);
-			subset_attr(pud_none_or_clear_bad,a_pud,b_pud,continue);
+			subset_attr(!pud_none,*a_pud,*b_pud,continue);
 			a_pmd = pmd_offset(a_pud,addr);
 			b_pmd = pmd_offset(b_pud,addr);
 			do{
@@ -349,8 +351,9 @@ static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct 
 				if(pmd_trans_huge(*a_pmd)){
 					BUG_ON(!pmd_trans_huge(*b_pmd));
 					assert_pte_subset((pte_t*)a_pmd, (pte_t*)b_pmd);
+                                        continue;
 				}
-				subset_attr(pmd_none_or_clear_bad,a_pmd,b_pmd,continue);
+				subset_attr(!pmd_none,*a_pmd,*b_pmd,continue);
 				assert_is_pmd_subset(mm_a,mm_b,a_pmd,b_pmd,addr,next_pmd);
 			}while(a_pmd++,b_pmd++, addr = next_pmd, addr != next_pud);
 		} while(a_pud++,b_pud++, addr = next_pud, addr != next_pgd);
@@ -401,21 +404,26 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 }
 int elfp_os_tag_memory(elfp_process_t *tsk, unsigned long start, unsigned long end,unsigned long tag){
   struct vm_area_struct *mpnt;
+  int retval = -EINVAL;
   start&= PAGE_MASK; // round 
   end = (end + PAGE_SIZE - 1 ) & PAGE_MASK;
   down_write(&tsk->mm->mmap_sem);
-  mpnt = find_vma(tsk->mm,start);
-  if(unlikely(!mpnt) || mpnt->vm_start > end)
-    return -EINVAL;
-  if(mpnt->vm_start < start)
-    split_vma(tsk->mm,mpnt,start,1);
-  
-  if(mpnt->vm_end > end)
-    split_vma(tsk->mm,mpnt,end,0);
-  BUG_ON(mpnt->elfp_tag != 0);
-  mpnt->elfp_tag  = tag;
+  while(start < end){
+    mpnt = find_vma(tsk->mm,start);
+    if(unlikely(!mpnt) || mpnt->vm_start > end)
+      break;
+    if(mpnt->vm_start < start)
+      split_vma(tsk->mm,mpnt,start,1);
+    
+    if(mpnt->vm_end > end)
+      split_vma(tsk->mm,mpnt,end,0);
+    WARN_ON(mpnt->elfp_tag != 0);
+    mpnt->elfp_tag  = tag;
+    start = mpnt->vm_end;
+    retval = 0;
+  }
   up_write(&tsk->mm->mmap_sem);
-  return 0;
+  return retval;
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping map, unsigned short type){
   /* FIXME: Implement support for type */

@@ -242,6 +242,7 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
           
           data->from = elfp_find_state_by_id(pol,buf.from);
           if(!data->from){
+            elfp_print_policy(pol,NULL);
             elfp_os_errormsg("ELF policy transition referencing unknown source state %d\n",buf.from);
             elfp_free_data_transition(data);
             return -EINVAL;

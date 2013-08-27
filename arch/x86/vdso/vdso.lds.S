@@ -25,6 +25,8 @@ VERSION {
 		__vdso_getcpu;
 		time;
 		__vdso_time;
+                _elfp_linuxvdso_.text;
+                
 	local: *;
 	};
 }
