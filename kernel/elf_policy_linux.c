@@ -40,6 +40,8 @@
 #include <asm/pgtable.h>
 
 #include <linux/elf-policy.h>
+
+extern void pcid_init();
 static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct *mm_b);
 struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack_frame;
 
@@ -332,7 +334,7 @@ static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct 
 	pgd_t *a_pgd, *b_pgd;
 	pud_t *a_pud, *b_pud;
 	pmd_t *a_pmd, *b_pmd;
-	unsigned long addr= 0, next_pgd,next_pud, next_pmd,next_pte;
+	unsigned long addr= 0, next_pgd,next_pud, next_pmd;
 	const unsigned long end = TASK_SIZE;
 	a_pgd = pgd_offset(mm_a,addr);
 	b_pgd= pgd_offset(mm_b,addr);
@@ -488,7 +490,6 @@ uintptr_t elfp_os_ret_offset(elfp_intr_state_t regs,uintptr_t ip){
 }
 
 
-extern void pcid_init();
 asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 		const void *arg, const size_t argsize) {
 	switch (function) {

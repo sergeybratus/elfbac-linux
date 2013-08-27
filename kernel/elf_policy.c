@@ -20,27 +20,24 @@ struct elfp_call_transition *elfp_os_find_call_transition(struct elfp_state *sta
 int elfp_handle_instruction_address_fault(uintptr_t address,
                                           elfp_process_t *tsk,elfp_os_mapping map,elfp_intr_state_t regs) {
   struct elfp_state *state = elfp_task_get_current_state(tsk);
+  struct elfp_call_transition * transition;
   int retval = elfp_handle_data_address_fault(address,tsk,ELFP_RW_EXEC,map,regs);
   if (retval)  /* Handle an instruction fetch that hasn't been
                   ported yet */
     return retval;
   /* Maybe it's a return?*/
   if(ELFP_TASK_STACKPTR(tsk) && ELFP_TASK_STACKPTR(tsk)->ret_offset == address)     { 
-#if 0
     struct elfp_stack_frame *stack = ELFP_TASK_STACKPTR(tsk);
     //elfp_os_copy_stack_bytes(stack->stack,stack->to->stack,stack->returnbytes);
     ELFP_TASK_STACKPTR(tsk) = stack->down;
-    elfp_free_stack_frame(stack);
     elfp_os_change_context(tsk,stack->trans->from,regs);
-    return 1;
-#endif
+    elfp_free_stack_frame(stack);
   }
-  struct elfp_call_transition * transition = elfp_os_find_call_transition(state,address);
+  transition = elfp_os_find_call_transition(state,address);
   if(!transition)
     return 0;
   if(transition->returnbytes >=0) /*If returning will be allowed*/
     {
-#if 0
       struct elfp_stack_frame *stack= elfp_alloc_stack_frame(); /*TODO check for oom conditions */
       /*TODO: Copy stack bytes */
       stack->down = ELFP_TASK_STACKPTR(tsk);
@@ -48,7 +45,6 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
       stack->ret_offset = elfp_os_ret_offset(regs,address);
       stack->returnbytes = transition->returnbytes;
       ELFP_TASK_STACKPTR(tsk)= stack;
-#endif 
     }
   elfp_os_change_context(tsk,transition->to,regs);/* TODO: Copy stack, handle return */
   return 1;
@@ -321,9 +317,8 @@ int elfp_destroy_policy(struct elf_policy *policy)
 int elfp_print_policy(struct elf_policy *policy,struct elfp_state *cur){
   struct elfp_state *state;
   for(state=policy->states;state;state = state->next){
-
-    elfp_os_errormsg("%sState %d\n", (cur == state)?"*": " ", state->id);
     struct rb_node *iter;
+    elfp_os_errormsg("%sState %d\n", (cur == state)?"*": " ", state->id);
     for(iter=rb_first(&state->data);iter; iter=rb_next(iter)){
       struct elfp_data_transition *pp = container_of(iter,struct elfp_data_transition,tree);
       elfp_os_errormsg("\t %d->%d data\t%ld\t%x\n",pp->from->id,pp->to->id,pp->tag,pp->type);
