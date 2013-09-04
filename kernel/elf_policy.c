@@ -111,8 +111,10 @@ static int elfp_insert_data_transition(struct elfp_data_transition *data){
       new=&((*new)->rb_left);
     else if(data->tag > transition->tag)
       new=&((*new)->rb_right);
-    else 
+    else {
+      elfp_os_errormsg("Elfbac parse error: Already have data transition from %d to %d tag %lu\n", data->from->id, data->to->id, data->tag);
       return -EINVAL;
+    }
   }
   /*FIXME: Check against overlap with next*/
   rb_link_node(&data->tree, parent, new);
@@ -130,8 +132,11 @@ static int elfp_insert_call_transition(struct elfp_call_transition *data){
       new=&((*new)->rb_left);
     else if(address > transition->offset)
       new=&((*new)->rb_right);
-    else 
+    else {
+      elfp_os_errormsg("Already have a call transition from %d to %d at offset %p\n",
+                       data->from->id, data->to->id, (void *)data->offset);
       return -EINVAL; /* Overlap */
+    }
   }
   rb_link_node(&data->tree, parent, new);
   rb_insert_color(&data->tree, &data->from->calls);

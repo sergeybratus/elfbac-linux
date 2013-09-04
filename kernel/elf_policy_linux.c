@@ -361,16 +361,57 @@ static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct 
 		} while(a_pud++,b_pud++, addr = next_pud, addr != next_pgd);
 	} while(a_pgd++, b_pgd++, addr = next_pgd, addr < end);
 }
+static void pte_range_nuke(struct mm_struct *mm_clone, unsigned long addr, unsigned long end)
+{
+  	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+        pte_t *pte, *orig_pte;
+	unsigned long next_pgd,next_pud, next_pmd;
+        spinlock_t *ptl;
+	pgd = pgd_offset(mm_clone,addr);
+	do {
+		next_pgd = pgd_addr_end(addr,end);
+                if(pgd_none(*pgd)) 
+                  continue;
+                pud = pud_offset(pgd,addr);
+		do{
+			next_pud = pud_addr_end(addr,next_pgd);
+                        if(pud_none(*pud))
+                          continue;
+			pmd = pmd_offset(pud,addr);
+			do{
+				next_pmd = pmd_addr_end(addr,next_pud);
+                                if(pmd_none(*pmd))
+                                  continue;
+				if(pmd_trans_huge(*pmd)){
+                                  pte_clear(mm_clone,addr, pmd);
+                                  continue;
+				}
+                                pte = pte_alloc_map_lock(mm_clone, pmd, addr,&ptl);
+                                BUG_ON(!pte);
+                                orig_pte = pte;
+                                do{
+                                  pte_clear(mm_clone,addr,pte);
+                                }while(pte++,addr+=PAGE_SIZE,addr < next_pmd);
+                                pte_unmap_unlock(orig_pte,ptl);                               
+			}while(pmd++, addr = next_pmd, addr < next_pud);
+                        cond_resched();
+		} while(pud++, addr = next_pud, addr < next_pgd);
+	} while(pgd++,  addr = next_pgd, addr < end);
+}
 void elfp_os_invalidate_clones(struct mm_struct *mm,
 			unsigned long start, unsigned long end){
-	/*BUG_ON(start>=end);
+  
+	BUG_ON(start>=end);
 	if(mm->elfp_clones){
 		struct mm_struct *clone = mm->elfp_clones;
 		while(clone){
-			do_munmap(clone,start,end-start);
-			clone = clone->elfp_clones_next;
+                  
+                  pte_range_nuke(clone,start,end-start);
+                  clone = clone->elfp_clones_next;
 		}
-	}*/
+	}
 }
 static void elfp_mmu_notifier_invalidate_range(struct mmu_notifier *mn,
 				      struct mm_struct *mm,
@@ -379,8 +420,8 @@ static void elfp_mmu_notifier_invalidate_range(struct mmu_notifier *mn,
 		
 }
 static const struct mmu_notifier_ops elfp_mmu_notifier_ops = {
-	.invalidate_page  = elfp_mmu_notifier_invalidate_page,
-	.invalidate_range_end = elfp_mmu_notifier_invalidate_range,
+  //	.invalidate_page  = elfp_mmu_notifier_invalidate_page,
+	.invalidate_range_start = elfp_mmu_notifier_invalidate_range,
 };
 struct mmu_notifier elfp_mmu_notifier = {
 	.ops = &elfp_mmu_notifier_ops,
@@ -419,7 +460,7 @@ int elfp_os_tag_memory(elfp_process_t *tsk, unsigned long start, unsigned long e
     
     if(mpnt->vm_end > end)
       split_vma(tsk->mm,mpnt,end,0);
-    WARN_ON(mpnt->elfp_tag != 0);
+    WARN_ON(mpnt->elfp_tag != 0 && mpnt->elfp_tag != tag);
     mpnt->elfp_tag  = tag;
     start = mpnt->vm_end;
     retval = 0;
@@ -443,6 +484,7 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
 	int have_mmu_notifier = 1;
+        //TODO: We need to note this on a per mm basis, not per task
 	if(tsk->policy)
 		elfp_task_release_policy(tsk->elf_policy);
 	else
@@ -454,6 +496,8 @@ void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct 
 	tsk->elf_policy_mm = tsk->active_mm;
 	tsk->elfp_current = initialstate;
 	elfp_os_change_context(tsk,initialstate,regs);
+        if(!have_mmu_notifier)
+          mmu_notifier_register(&elfp_mmu_notifier, tsk->elf_policy_mm);
 	atomic_inc(&(policy->refs));
 }
 void elfp_os_free_context(elfp_context_t *context){

@@ -3970,7 +3970,7 @@ retry:		task_lock(tsk);
 #endif 
 		mm = get_task_mm(tsk);
 #ifdef CONFIG_ELF_POLICY
-	elfp_os_invalidate_clones(mm,addr,addr+len);
+	//elfp_os_invalidate_clones(mm,addr,addr+len);
 #endif
 	if (!mm)
 		return 0;

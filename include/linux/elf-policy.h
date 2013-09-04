@@ -43,11 +43,7 @@
  struct elfp_desc_header{
 	 uint32_t chunkcount;
  } __attribute__ ((__packed__));
-struct elfp_desc_stack{
-  elfp_chunk_header_t chunktype;
-  elfp_id_t id;
-  uint64_t size;
-} __attribute__((__packed__));
+
 struct   elfp_desc_state{
   elfp_chunk_header_t chunktype;
   elfp_id_t id;
@@ -62,8 +58,7 @@ struct elfp_desc_static_tag{
   elfp_chunk_header_t chunktype;
   unsigned long tag;
   unsigned long begin; /*The start of the address range*/
-  unsigned long size; /*The size of the address range if  ELFP_RW_SIZE is set, otherwise the end of the
-                     address range*/
+  unsigned long size; 
 }__attribute__ ((__packed__));
 
 struct elfp_desc_access{
