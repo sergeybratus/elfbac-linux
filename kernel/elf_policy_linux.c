@@ -64,7 +64,7 @@ static void elfp_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
           BUG_ON("delete PTE from each clone");
 	}
 }
-
+//This borrow heavily from fork.c and memory.c
 int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
                         pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
                         unsigned long addr, unsigned long end, int drop_write,int drop_exec) {
