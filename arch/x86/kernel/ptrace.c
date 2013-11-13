@@ -1489,7 +1489,6 @@ void send_sigtrap(struct task_struct *tsk, struct pt_regs *regs,
  * We must return the syscall number to actually look up in the table.
  * This can be -1L to skip running any syscall at all.
  */
-void assert_task_elfbac_clones_valid(struct task_struct *tsk);
 long syscall_trace_enter(struct pt_regs *regs)
 {
 	long ret = 0;
@@ -1530,8 +1529,6 @@ long syscall_trace_enter(struct pt_regs *regs)
 				    regs->dx, regs->r10);
 #endif
 
-        ////TODO: For DEBUGGING ONLY 
-        assert_task_elfbac_clones_valid(current);
 	return ret ?: regs->orig_ax;
 }
 
@@ -1554,6 +1551,4 @@ void syscall_trace_leave(struct pt_regs *regs)
 			!test_thread_flag(TIF_SYSCALL_EMU);
 	if (step || test_thread_flag(TIF_SYSCALL_TRACE))
 		tracehook_report_syscall_exit(regs, step);
-        ////TODO: For DEBUGGING ONLY 
-        assert_task_elfbac_clones_valid(current);
 }
