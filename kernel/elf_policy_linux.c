@@ -538,6 +538,18 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping
   assert_is_pagetable_subset(to,from->mm);
   return 0;
 }
+void assert_task_elfbac_clones_valid(elfp_process_t *tsk)
+{
+  struct mm_struct *clone ;
+  if(!tsk->mm)
+    return;
+  clone = tsk->mm->elfp_clones;
+  while(clone)
+    {
+      assert_is_pagetable_subset(clone,tsk->mm);
+      clone = clone->elfp_clones_next;
+    }
+}
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){
 	int have_mmu_notifier = 1;
         //TODO: We need to note this on a per mm basis, not per task
