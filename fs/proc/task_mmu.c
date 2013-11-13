@@ -248,7 +248,9 @@ show_map_vma(struct seq_file *m, struct vm_area_struct *vma, int is_pid)
 			flags & VM_MAYSHARE ? 's' : 'p',
 			pgoff,
 			MAJOR(dev), MINOR(dev), ino, &len);
-
+#ifdef CONFIG_ELF_POLICY //TODO:This really has to go into its own procfs, but alas, no time
+        seq_printf(m," %lu",vma->elfp_tag);
+#endif
 	/*
 	 * Print the dentry name for named mappings, and a
 	 * special [heap] marker for the heap:

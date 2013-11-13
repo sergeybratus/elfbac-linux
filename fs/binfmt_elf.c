@@ -32,6 +32,7 @@
 #include <linux/elf.h>
 #include <linux/utsname.h>
 #include <linux/coredump.h>
+#include <linux/elf-policy.h>
 #include <asm/uaccess.h>
 #include <asm/param.h>
 #include <asm/page.h>
@@ -373,7 +374,7 @@ static unsigned long total_mapping_size(struct elf_phdr *cmds, int nr)
    so we keep this separate.  Technically the library read function
    is only provided so that we can read a.out libraries that have
    an ELF header */
-
+/*FIXME: This needs to load the interpreter ELFbac policy*/
 static unsigned long load_elf_interp(struct elfhdr *interp_elf_ex,
 		struct file *interpreter, unsigned long *interp_map_addr,
 		unsigned long no_base)
@@ -681,7 +682,6 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 		}
 		elf_ppnt++;
 	}
-
 	elf_ppnt = elf_phdata;
 	for (i = 0; i < loc->elf_ex.e_phnum; i++, elf_ppnt++)
 		if (elf_ppnt->p_type == PT_GNU_STACK) {
@@ -975,7 +975,35 @@ static int load_elf_binary(struct linux_binprm *bprm, struct pt_regs *regs)
 	 */
 	ELF_PLAT_INIT(regs, reloc_func_desc);
 #endif
-
+#if 0
+        //#ifdef CONFIG_ELF_POLICY
+	elf_ppnt = elf_phdata;
+	for (i = 0; i < loc->elf_ex.e_phnum; i++, elf_ppnt++)
+	if (elf_ppnt->p_type == PT_ELFBAC_POLICY) {
+		void *elfp_buf = kmalloc(elf_ppnt->p_filesz,GFP_KERNEL);
+		if(!elfp_buf){
+			printk(KERN_ERR,"Unable to allocate buffer for ELFbac policy. Killing\n");
+			send_sig(SIGKILL, current, 0);
+			goto out;
+		}
+		retval = kernel_read(bprm->file, elf_ppnt->p_offset,
+				     elfp_buf,
+				     elf_ppnt->p_filesz);
+		if (retval != elf_ppnt->p_filesz) {
+			if (retval >= 0)
+				retval = -EIO;
+			send_sig(SIGKILL, current, 0);
+			goto out;
+		}
+		retval = elfp_parse_policy((uintptr_t)elfp_buf, (uintptr_t)(elf_ppnt->p_filesz),current,regs);
+		kfree(elfp_buf);
+		if(retval < 0){
+		  printk(KERN_ERR "Error parsing elfbac policy. Killing process");
+			send_sig(SIGKILL,current,0);
+			goto out;
+		}
+	}
+#endif
 	start_thread(regs, elf_entry, bprm->p);
 	retval = 0;
 out:

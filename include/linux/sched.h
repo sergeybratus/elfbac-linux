@@ -100,7 +100,9 @@ struct bio_list;
 struct fs_struct;
 struct perf_event_context;
 struct blk_plug;
-
+#ifdef CONFIG_ELF_POLICY
+struct elf_policy_region;
+#endif
 /*
  * List of flags we want to share for kernel threads,
  * if only because they are not used by them anyway.
@@ -1326,6 +1328,14 @@ struct task_struct {
 #endif
 
 	struct mm_struct *mm, *active_mm;
+#ifdef CONFIG_ELF_POLICY
+  /*TODO: Re-evaluate if some of this should rather go into mm_struct. ELF policy states are
+    per-mm. Implement full MxN sharing*/
+	struct mm_struct *elf_policy_mm; /* Used for pagefaulting */
+	struct elf_policy *elf_policy; /* Linked list of ELF policy segments*/
+	struct elfp_stack_frame *elfp_stack;
+	struct elfp_state *elfp_current; 
+#endif
 #ifdef CONFIG_COMPAT_BRK
 	unsigned brk_randomized:1;
 #endif

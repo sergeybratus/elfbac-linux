@@ -2054,9 +2054,19 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	struct mm_struct *mm, *oldmm;
 
 	prepare_task_switch(rq, prev, next);
-
-	mm = next->mm;
-	oldmm = prev->active_mm;
+#ifdef CONFIG_ELF_POLICY
+	if(next->elf_policy_mm)
+		mm = next->elf_policy_mm;
+	else
+		mm = next->mm;
+#endif
+#ifdef CONFIG_ELF_POLICY
+	if(prev->elf_policy_mm){
+          BUG_ON(prev->active_mm != prev->mm);
+          oldmm = prev->elf_policy_mm;
+	}else
+#endif
+          oldmm = prev->active_mm;
 	/*
 	 * For paravirt, this is coupled with an exit in switch_to to
 	 * combine the page table reload and the switch backend into

@@ -104,6 +104,14 @@ extern struct group_info init_groups;
 #else
 #define INIT_TASK_RCU_BOOST()
 #endif
+#ifdef CONFIG_ELF_POLICY
+#define INIT_TASK_ELF_POLICY						\
+	.elf_policy_mm = NULL,							\
+	.elf_policy = NULL, 							\
+	.elfp_current = NULL
+#else
+#define INIT_TASK_ELF_POLICY
+#endif
 #ifdef CONFIG_TREE_PREEMPT_RCU
 #define INIT_TASK_RCU_TREE_PREEMPT()					\
 	.rcu_blocked_node = NULL,
@@ -140,7 +148,6 @@ extern struct task_group root_task_group;
 #else
 # define INIT_PERF_EVENTS(tsk)
 #endif
-
 #define INIT_TASK_COMM "swapper"
 
 /*
@@ -210,6 +217,7 @@ extern struct task_group root_task_group;
 	INIT_TRACE_RECURSION						\
 	INIT_TASK_RCU_PREEMPT(tsk)					\
 	INIT_CPUSET_SEQ							\
+	INIT_TASK_ELF_POLICY				\
 }
 
 

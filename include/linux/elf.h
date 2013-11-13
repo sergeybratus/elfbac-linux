@@ -33,6 +33,7 @@ typedef __s64	Elf64_Sxword;
 #define PT_SHLIB   5
 #define PT_PHDR    6
 #define PT_TLS     7               /* Thread local storage segment */
+#define PT_ELFBAC_POLICY  42 /*8 existed in /init on my machine. This number didn't give me problems */
 #define PT_LOOS    0x60000000      /* OS-specific */
 #define PT_HIOS    0x6fffffff      /* OS-specific */
 #define PT_LOPROC  0x70000000
@@ -98,6 +99,8 @@ typedef __s64	Elf64_Sxword;
 #define DT_TEXTREL	22
 #define DT_JMPREL	23
 #define DT_ENCODING	32
+#define DT_ELFBAC       34
+#define DT_ELFBACSZ     35
 #define OLD_DT_LOOS	0x60000000
 #define DT_LOOS		0x6000000d
 #define DT_HIOS		0x6ffff000
@@ -278,7 +281,9 @@ typedef struct elf64_phdr {
 #define SHT_REL		9
 #define SHT_SHLIB	10
 #define SHT_DYNSYM	11
-#define SHT_NUM		12
+#define SHT_ELFBAC      12
+#define SHT_NUM		13
+
 #define SHT_LOPROC	0x70000000
 #define SHT_HIPROC	0x7fffffff
 #define SHT_LOUSER	0x80000000

@@ -55,7 +55,8 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/oom.h>
 #include <linux/compat.h>
-
+#include <linux/elf-policy.h>
+#include <linux/mmu_notifier.h>
 #include <asm/uaccess.h>
 #include <asm/mmu_context.h>
 #include <asm/tlb.h>
@@ -1556,11 +1557,36 @@ static int do_execve_common(const char *filename,
 	retval = copy_strings(bprm->argc, argv, bprm);
 	if (retval < 0)
 		goto out;
-
+#ifdef CONFIG_ELF_POLICY
+	{
+		/* save ELF policy state, wipe it  before and restore on failure */
+		struct elf_policy *old_pol = current->elf_policy;
+		struct mm_struct *elf_policy_mm = current->elf_policy_mm;
+		struct elfp_state *elfp_current = current->elfp_current;
+		if(old_pol)
+			mmu_notifier_unregister(&elfp_mmu_notifier,current->mm);
+		current->elf_policy = NULL;
+		current->elf_policy_mm = NULL;
+		current->elfp_current = NULL;
+#endif
 	retval = search_binary_handler(bprm,regs);
-	if (retval < 0)
+	if (retval < 0){
+#ifdef CONFIG_ELF_POLICY
+		current->elf_policy= old_pol;  /* restore state */
+		current->elf_policy_mm = elf_policy_mm;
+		current->elfp_current =elfp_current;
+		if(old_pol)
+			mmu_notifier_register(&elfp_mmu_notifier,current->mm);
+#endif
 		goto out;
-
+	}
+#ifdef CONFIG_ELF_POLICY
+	else{
+		if(old_pol)
+			elfp_task_release_policy(old_pol); /* We just decreased the refcount */
+	}
+	}
+#endif
 	/* execve succeeded */
 	current->fs->in_exec = 0;
 	current->in_execve = 0;

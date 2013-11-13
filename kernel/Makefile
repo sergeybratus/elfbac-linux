@@ -106,7 +106,9 @@ obj-$(CONFIG_USER_RETURN_NOTIFIER) += user-return-notifier.o
 obj-$(CONFIG_PADATA) += padata.o
 obj-$(CONFIG_CRASH_DUMP) += crash_dump.o
 obj-$(CONFIG_JUMP_LABEL) += jump_label.o
-
+obj-$(CONFIG_ELF_POLICY) += elf_policy.o 
+$(obj)/elf_policy.o: kernel/elf_policy_linux.c
+CFLAGS_elf_policy.o += -O1 -ggdb
 $(obj)/configs.o: $(obj)/config_data.h
 
 # config_data.h contains the same information as ikconfig.h but gzipped.

@@ -857,5 +857,5 @@ asmlinkage long sys_process_vm_writev(pid_t pid,
 				      const struct iovec __user *rvec,
 				      unsigned long riovcnt,
 				      unsigned long flags);
-
+asmlinkage long sys_elf_policy( unsigned int function, unsigned int id, const void *arg, const size_t argsize);
 #endif

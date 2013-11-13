@@ -115,6 +115,10 @@ int init_new_context(struct task_struct *tsk, struct mm_struct *mm)
 		retval = copy_ldt(&mm->context, &old_mm->context);
 		mutex_unlock(&old_mm->context.lock);
 	}
+#ifdef CONFIG_MM_PCID
+	mm->context.pcid = 0;
+	mm->context.pcid_generation = 0;
+#endif
 	return retval;
 }
 

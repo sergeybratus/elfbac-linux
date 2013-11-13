@@ -680,6 +680,7 @@ static void exit_mm(struct task_struct * tsk)
 	/* more a memory barrier than a real lock */
 	task_lock(tsk);
 	tsk->mm = NULL;
+        tsk->elf_policy_mm = NULL;
 	up_read(&mm->mmap_sem);
 	enter_lazy_tlb(mm, current);
 	task_unlock(tsk);
