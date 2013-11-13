@@ -453,7 +453,7 @@ void elfp_os_invalidate_clones(struct mm_struct *mm,
 		while(clone){
                   pte_range_nuke(clone,start,end);
                   assert_is_pagetable_subset(clone,mm);
-                  clone = clone->elfp_clones_next;
+                  clone = clone->elfp_clones;
 		}
 	}
 }
@@ -464,7 +464,7 @@ static void elfp_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
 		struct mm_struct *clone = mm->elfp_clones;
 		while(clone){
                   assert_is_pagetable_subset(clone,mm);
-                  clone = clone->elfp_clones_next;
+                  clone = clone->elfp_clones;
                 }
         }
 }
@@ -547,7 +547,7 @@ void assert_task_elfbac_clones_valid(elfp_process_t *tsk)
   while(clone)
     {
       assert_is_pagetable_subset(clone,tsk->mm);
-      clone = clone->elfp_clones_next;
+      clone = clone->elfp_clones;
     }
 }
 void elfp_task_set_policy(elfp_process_t *tsk, struct elf_policy *policy,struct elfp_state *initialstate,elfp_intr_state_t regs){

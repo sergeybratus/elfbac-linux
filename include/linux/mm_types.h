@@ -402,7 +402,7 @@ struct mm_struct {
 #endif
 #ifdef CONFIG_ELF_POLICY
 	struct mm_struct  *elfp_clones;
-	struct mm_struct *elfp_clones_next;
+	
 #endif
 };
 
