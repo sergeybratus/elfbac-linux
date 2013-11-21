@@ -12,6 +12,8 @@ typedef unsigned short pcid_t;
 #define PCID_BLOCK_SIZE_SHIFT 5 /*Each processor gets 2^x PCIDs */
 #define PCID_BLOCK_SIZE (1u<< PCID_BLOCK_SIZE_SHIFT) /* 32 right now */
 #define PCID_MAX_BLOCKS (PCID_MAX / PCID_BLOCK_SIZE)
+#define PCID_BEGIN 1 /*PCID 0 is reserved for the kernel (swap_mm, everything that uses load_cr3).
+                       This will be flushed when it is loaded without the flag */
 /* add a static assertion here to make sure PCID_MAX_BLOCKS == 32 */
 /*
  * how to tune the block size: The large you make it, the less lock contention you have around the global counter,

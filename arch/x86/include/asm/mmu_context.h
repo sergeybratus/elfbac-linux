@@ -76,7 +76,7 @@ newblock:		pcid_block = atomic_add_return(PCID_BLOCK_SIZE, &pcid_current_block);
 					/* Now we need to reset the PCID generation and flush everything */
 					global_gen = atomic_add_return(1,&pcid_current_generation);
 					__get_cpu_var(cpu_pcid_generation) = global_gen;
-					atomic_set(&pcid_current_block,0);
+					atomic_set(&pcid_current_block,PCID_BEGIN);
 					if(global_gen <= 0){ /* Bad integer overflow */
 						printk(KERN_ERR "PCID generation overflow. Should not happen during the lifetime of normal hardware. "
 								"Probably ok, but bad things might happen, so consider rebooting to reset the PCID generation.\n");
@@ -94,7 +94,7 @@ newblock:		pcid_block = atomic_add_return(PCID_BLOCK_SIZE, &pcid_current_block);
 			next->context.pcid = pcid;
 		}
 		if(global_gen) /* global_gen = 0 if the CPU doesn't support  PCID */
-			load_cr3((pgd_t *)((uintptr_t) next->pgd | (uintptr_t) next->context.pcid | (uintptr_t) (1ul<<63))); /*Set bit 63 so the TLB does not get flushed */
+                  write_cr3(__pa(next->pgd) | next->context.pcid | (1ul<<63)); /*Set bit 63 so the TLB does not get flushed */
 		else
 #endif
 		/* Re-load page tables */
