@@ -27,6 +27,25 @@ config KGDB_SERIAL_CONSOLE
 	  Share a serial console with kgdb. Sysrq-g must be used
 	  to break in initially.
 
+config KGDB_8250
+	tristate "8250/16550 and compatible serial support"
+	depends on KGDB && SERIAL_8250
+	select SERIAL_8250_CONSOLE
+	help
+	  Uses a 8250/16550 compatible serial ports to communicate with the
+	  host GDB.  This is independent of the normal driver (SERIAL_8250)
+	  for this chipset.  The port is configured via kgdb8250=<config>,
+	  passed as kernel or module parameter, respectively.  The
+	  configuration comes in two flavors:
+
+	  <io|mmio>,<address>[/<regshift>],<baud rate>,<irq>
+	    or
+	  ttyS<n>,<baud rate>
+
+	  When built into the kernel, this driver allows debugging of
+	  the early boot process.  Note that, as long as the debugger is
+	  attached via this driver,  the configured serial port cannot be
+	  used by the standard 8250 driver or serial earlyprintk/earlycon.
 config KGDB_TESTS
 	bool "KGDB: internal test suite"
 	default n
