@@ -15,12 +15,13 @@
  *
  * Refactoring and cleanup for initial merge:
  * 2008 (c) Jan Kiszka <jan.kiszka@web.de>
- *
+ * Slightly tweaked for Linux 3.x: 
+ * 2013 (c) Julian Bangert <bangert@mit.edu>
  * This file is licensed under the terms of the GNU General Public License
  * version 2. This program is licensed "as is" without any warranty of any
  * kind, whether express or implied.
  */
-
+#include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/kgdb.h>
@@ -253,7 +254,7 @@ static int kgdb8250_parse_config(char *str)
 		kgdb8250_port.iotype = UPIO_MEM;
 		kgdb8250_port.flags &= ~UPF_IOREMAP;
 		str += 5;
-	} else if (!strncmp(str, "ttyS", 4)) {
+	}/* else if (!strncmp(str, "ttyS", 4)) {
 		str += 4;
 		if (*str < '0' || *str > '9')
 			return -EINVAL;
@@ -283,7 +284,7 @@ static int kgdb8250_parse_config(char *str)
 			return -EINVAL;
 
 		goto finish;
-	} else
+                }*/ else
 		return -EINVAL;
 
 	if (*str != ',')
@@ -528,4 +529,5 @@ void kgdb8250_arch_init(void)
 	kgdb8250_parse_config(config);
 }
 early_param("kgdb8250", kgdb8250_parse_config);
+//__setup("kgdb8250=", kgdb8250_parse_config);
 #endif

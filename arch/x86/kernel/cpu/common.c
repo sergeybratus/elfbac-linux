@@ -1171,6 +1171,24 @@ static void dbg_restore_debug_regs(void)
  */
 #ifdef CONFIG_X86_64
 
+#ifdef CONFIG_MM_PCID
+atomic_t pcid_current_generation = ATOMIC_INIT(0);
+atomic_t pcid_current_block = ATOMIC_INIT(0);
+DEFINE_PER_CPU(pcid_t, current_pcid) = PCID_BEGIN;
+DEFINE_PER_CPU(pcid_t, max_pcid_block) = 0;
+DEFINE_PER_CPU(pcid_generation_t, cpu_pcid_generation) =0 ;
+void pcid_init(){
+	static bool boot_cpu = true;
+	if(cpu_has_pcid){
+		if(boot_cpu)
+			atomic_set(&pcid_current_generation,1);
+		set_in_cr4(X86_CR4_PCIDE);
+	}
+}
+#else
+void pcid_init() {}
+#endif
+
 void __cpuinit cpu_init(void)
 {
 	struct orig_ist *oist;
@@ -1259,7 +1277,7 @@ void __cpuinit cpu_init(void)
 
 	fpu_init();
 	xsave_init();
-
+	pcid_init();
 	raw_local_save_flags(kernel_eflags);
 
 	if (is_uv_system())

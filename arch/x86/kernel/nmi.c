@@ -32,12 +32,7 @@
 #include <asm/x86_init.h>
 
 #define NMI_MAX_NAMELEN	16
-struct nmiaction {
-	struct list_head list;
-	nmi_handler_t handler;
-	unsigned int flags;
-	char *name;
-};
+
 
 struct nmi_desc {
 	spinlock_t lock;
@@ -107,7 +102,7 @@ static int notrace __kprobes nmi_handle(unsigned int type, struct pt_regs *regs,
 	return handled;
 }
 
-static int __setup_nmi(unsigned int type, struct nmiaction *action)
+int __setup_nmi(unsigned int type, struct nmiaction *action)
 {
 	struct nmi_desc *desc = nmi_to_desc(type);
 	unsigned long flags;
@@ -134,7 +129,7 @@ static int __setup_nmi(unsigned int type, struct nmiaction *action)
 	return 0;
 }
 
-static struct nmiaction *__free_nmi(unsigned int type, const char *name)
+struct nmiaction *__free_nmi(unsigned int type, const char *name)
 {
 	struct nmi_desc *desc = nmi_to_desc(type);
 	struct nmiaction *n;
