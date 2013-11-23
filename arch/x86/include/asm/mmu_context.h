@@ -118,7 +118,12 @@ newblock:		pcid_block = atomic_add_return(PCID_BLOCK_SIZE, &pcid_current_block);
 			 * tlb flush IPI delivery. We must reload CR3
 			 * to make sure to use no freed page tables.
 			 */
-			load_cr3(next->pgd);
+#ifdef CONFIG_MM_PCID
+                  if(next->context.pcid)
+                    write_cr3(__pa(next->pgd) | next->context.pcid);
+                  else
+#endif
+                    load_cr3(next->pgd); 
 			load_LDT_nolock(&next->context);
 		}
 	}

@@ -378,6 +378,7 @@ static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct 
 	pmd_t *a_pmd, *b_pmd;
 	unsigned long addr= 0, next_pgd,next_pud, next_pmd;
 	const unsigned long end = TASK_SIZE;
+        return;
         BUG_ON(!mm_b);
         BUG_ON(!mm_a);
 	a_pgd = pgd_offset(mm_a,addr);
@@ -516,7 +517,7 @@ int elfp_os_tag_memory(elfp_process_t *tsk, unsigned long start, unsigned long e
     
     if(mpnt->vm_end > end)
       split_vma(tsk->mm,mpnt,end,0);
-    WARN_ON(mpnt->elfp_tag != 0 && mpnt->elfp_tag != tag);
+    //    WARN_ON(mpnt->elfp_tag != 0 && mpnt->elfp_tag != tag);
     mpnt->elfp_tag  = tag;
     start = mpnt->vm_end;
     retval = 0;
@@ -674,6 +675,28 @@ static void elfp_subpagenx_hack(unsigned long addr, unsigned long new_addr){
   func(); // This is jumping to a RET
   *pte = tmp;
 }
+static int page_present(struct mm_struct *mm,unsigned long address,int value){
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	int retval;
+	pgd = pgd_offset(mm,address);
+	if(pgd_none(*pgd) || !pgd_present(*pgd)) return 0;
+	pud = pud_offset(pgd,address);
+	if(pud_none(*pud) || !pud_present(*pud)) return 0;
+	pmd = pmd_offset(pud,address);
+	if(pmd_none(*pmd) || !pmd_present(*pmd)) return 0;
+	pte = pte_offset_map(pmd,address);
+	if(pte_none(*pte)){ pte_unmap(pte); return 0;}
+	if(value)
+		*pte = pte_set_flags(*pte,_PAGE_PRESENT);
+	else
+		*pte = pte_clear_flags(*pte,_PAGE_PRESENT);
+	pte_unmap(pte);
+	return retval;
+}
+
 asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 		const void *arg, const size_t argsize) {
 	switch (function) {
@@ -711,6 +734,41 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
         case 501: /*  Subpage-NX : Explicitly de-synchronise the TLB*/
           elfp_subpagenx_hack((unsigned long)arg, (unsigned long)argsize);
           return 0;
+    case 502: /* HACK: Explicitly test PCID. Userspace needs at least two contexts */
+    {
+    	struct task_struct *tsk = current;
+    	struct elfp_state *s1,*s2,*orig;
+        volatile unsigned int *ptr = (unsigned int *)arg;      
+        int i;
+        volatile int counter = 50000000;
+    	if(!tsk || !tsk->elf_policy)
+    		return 1 ;
+    	if(!tsk->mm)
+    		return 1;
+    	s1= elfp_find_state_by_id(tsk->elf_policy,id);
+        s2=  elfp_find_state_by_id(tsk->elf_policy,id+1);
+    	if(!s1)
+    		return 1 ;
+    	if(!s2)
+    		return 1;
+        //  switch_mm(oldmm,m1,tsk);
+        orig  = tsk->elfp_current;
+        if(s1!=orig)
+          elfp_os_change_context(tsk,s1,NULL);
+        preempt_disable();
+        for(i=0;i<counter;i++){
+          WARN_ON(*ptr != argsize);
+          elfp_os_change_context(tsk,s2,NULL);
+          WARN_ON(*ptr != argsize);
+          elfp_os_change_context(tsk,s1,NULL);
+          WARN_ON(*ptr != argsize);
+          elfp_os_change_context(tsk,s2,NULL);
+          WARN_ON(*ptr != argsize);
+          elfp_os_change_context(tsk,s1,NULL);
+        }
+        preempt_enable();
+        elfp_os_change_context(tsk,orig, NULL);
+    }
 	default:
 		return -EINVAL;
 	}

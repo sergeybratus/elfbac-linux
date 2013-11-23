@@ -248,7 +248,6 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
           
           data->from = elfp_find_state_by_id(pol,buf.from);
           if(!data->from){
-            elfp_print_policy(pol,NULL);
             elfp_os_errormsg("ELF policy transition referencing unknown source state %d\n",buf.from);
             elfp_free_data_transition(data);
             return -EINVAL;
@@ -286,7 +285,6 @@ int elfp_parse_policy(uintptr_t start,uintptr_t size, elfp_process_t *tsk,elfp_i
     return -EINVAL;
   }
   elfp_task_set_policy(tsk,pol,state,regs);
-  elfp_print_policy(pol,state);
   return 0;
 }
 struct elfp_stack_frame * elfp_copy_stack(struct elfp_stack_frame *stack,struct elf_policy *newpol){
