@@ -65,7 +65,7 @@ static void elfp_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 	}
 }
 //This borrow heavily from fork.c and memory.c
-int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+static int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
                         pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
                         unsigned long addr, unsigned long end, int drop_write,int drop_exec) {
   pte_t *orig_src_pte, *orig_dst_pte;
@@ -85,7 +85,7 @@ int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
   spin_lock_nested(src_ptl, SINGLE_DEPTH_NESTING);
   orig_src_pte = src_pte;
   orig_dst_pte = dst_pte;
-  arch_enter_lazy_mmu_mode();
+  //  arch_enter_lazy_mmu_mode();
 
   do {
 	  pte_t pte = *src_pte;
@@ -96,7 +96,7 @@ int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	  set_pte_at(dst_mm, addr, dst_pte, pte);
   }while (dst_pte++, src_pte++, addr += PAGE_SIZE, addr != end);
 
-  arch_leave_lazy_mmu_mode();
+  //  arch_leave_lazy_mmu_mode();
   spin_unlock(src_ptl);
   pte_unmap(orig_src_pte)  ;
   pte_unmap_unlock(orig_dst_pte, dst_ptl);
@@ -352,6 +352,7 @@ static void assert_is_pmd_subset(struct mm_struct *src_mm, struct mm_struct *dst
 	  pte_t *orig_src_pte, *orig_dst_pte;
 	  pte_t *src_pte, *dst_pte;
 	  spinlock_t *src_ptl, *dst_ptl;
+  return;
 	  //TODO: on other architectures, this could overwrite
 	   dst_pte = pte_alloc_map_lock(dst_mm, dst_pmd, addr, &dst_ptl);
 	   BUG_ON (!dst_pte);
@@ -390,7 +391,7 @@ static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct 
 		b_pud = pud_offset(b_pgd,addr);
 		do{
 			next_pud = pud_addr_end(addr,next_pgd);
-			subset_attr(!pud_none,pud_val,*a_pud,*b_pud,continue,mm_a,mm_b,addr);
+
 			a_pmd = pmd_offset(a_pud,addr);
 			b_pmd = pmd_offset(b_pud,addr);
 			do{
@@ -400,8 +401,6 @@ static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct 
 					assert_pte_subset((pte_t*)a_pmd, (pte_t*)b_pmd,mm_a,mm_b,addr);
                                         continue;
 				}
-				subset_attr(!pmd_none,pmd_val,*a_pmd,*b_pmd,continue,mm_a,mm_b,addr);
-				assert_is_pmd_subset(mm_a,mm_b,a_pmd,b_pmd,addr,next_pmd);
 			}while(a_pmd++,b_pmd++, addr = next_pmd, addr != next_pud);
 		} while(a_pud++,b_pud++, addr = next_pud, addr != next_pgd);
 	} while(a_pgd++, b_pgd++, addr = next_pgd, addr < end);
@@ -472,8 +471,8 @@ static void elfp_mmu_notifier_invalidate_range_start(struct mmu_notifier *mn,
 static void elfp_mmu_notifier_invalidate_range_end(struct mmu_notifier *mn,
 				      struct mm_struct *mm,
 					unsigned long start,unsigned long end){
-  //	elfp_os_invalidate_clones(mm,start,end);
-  elfp_os_invalidate_clones(mm,0,TASK_SIZE);		
+  elfp_os_invalidate_clones(mm,start,end);
+  //  elfp_os_invalidate_clones(mm,0,TASK_SIZE);		
 }
 static const struct mmu_notifier_ops elfp_mmu_notifier_ops = {
   //	.invalidate_page  = elfp_mmu_notifier_invalidate_page,
@@ -769,6 +768,41 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
         preempt_enable();
         elfp_os_change_context(tsk,orig, NULL);
     }
+        case 503: /* Dangerous. Test ITLB PCID*/
+          {
+            struct task_struct *tsk = current;
+            struct elfp_state *s1,*s2,*orig;
+            int (*ptr)(void) = (void (*)(void))arg;      
+            int i;
+            volatile int counter = 50000000;
+            if(!tsk || !tsk->elf_policy)
+              return 1 ;
+            if(!tsk->mm)
+              return 1;
+            s1= elfp_find_state_by_id(tsk->elf_policy,id);
+            s2=  elfp_find_state_by_id(tsk->elf_policy,id+1);
+            if(!s1)
+              return 1 ;
+            if(!s2)
+              return 1;
+            //  switch_mm(oldmm,m1,tsk);
+            orig  = tsk->elfp_current;
+            if(s1!=orig)
+              elfp_os_change_context(tsk,s1,NULL);
+            preempt_disable();
+            for(i=0;i<counter;i++){
+              WARN_ON(ptr() != argsize);
+              elfp_os_change_context(tsk,s2,NULL);
+              WARN_ON(ptr() != argsize);
+              elfp_os_change_context(tsk,s1,NULL);
+              WARN_ON(ptr() != argsize);
+              elfp_os_change_context(tsk,s2,NULL);
+              WARN_ON(ptr() != argsize);
+              elfp_os_change_context(tsk,s1,NULL);
+            }
+        preempt_enable();
+        elfp_os_change_context(tsk,orig, NULL);
+          }
 	default:
 		return -EINVAL;
 	}

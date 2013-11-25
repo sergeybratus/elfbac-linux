@@ -74,7 +74,8 @@ int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int ac
   if(transition && transition->type & access_type){
     if(state == transition->to){ /* This will be forever
                                     allowed -> map permanently */
-      if(!elfp_os_copy_mapping(tsk,state->context, map,transition->type))
+      if(!elfp_os_copy_mapping(tsk,state->context, map,transition->type)) /* TODO change this lazy
+                                                                             copy to an eager copy ?*/
         return 1;
     }
     else{
