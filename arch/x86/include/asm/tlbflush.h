@@ -39,10 +39,14 @@ static inline void __native_flush_tlb_global(void)
 
 static inline void __native_flush_tlb(void)
 {
+	static struct{
+		u64 t1;
+		u64 t2;
+	} zero_desc = {0,0};
 #ifdef CONFIG_MM_PCID
-	if(cpu_has_pcid) /* INVPCID function 2: Flush everything*/
+	if(cpu_has_pcid  && (native_read_cr4() & X86_CR4_PCIDE)) /* INVPCID function 2: Flush everything*/
 		/*__native_flush_tlb_global();*/
-		asm volatile ("movq $3, %%rax; invpcid (%%rdx),%%rax" ::: "rax");
+		asm volatile (" invpcid (%%rax),%%rbx" ::"b"(3ul), "a"(&zero_desc): );
 
 	else
 #endif
