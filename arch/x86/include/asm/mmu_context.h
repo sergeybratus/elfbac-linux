@@ -29,13 +29,6 @@ static inline void enter_lazy_tlb(struct mm_struct *mm, struct task_struct *tsk)
 		percpu_write(cpu_tlbstate.state, TLBSTATE_LAZY);
 #endif
 }
-#ifdef CONFIG_MM_PCID
-extern atomic_t pcid_current_generation;
-extern atomic_t pcid_current_block;
-DECLARE_PER_CPU(pcid_t, current_pcid);
-DECLARE_PER_CPU(pcid_t, max_pcid_block);
-DECLARE_PER_CPU(pcid_generation_t, cpu_pcid_generation);
-#endif
 static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 			     struct task_struct *tsk)
 {

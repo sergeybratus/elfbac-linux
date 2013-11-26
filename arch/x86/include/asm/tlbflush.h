@@ -7,6 +7,28 @@
 #include <asm/processor.h>
 #include <asm/special_insns.h>
 
+#ifdef CONFIG_MM_PCID
+#define INVPCID_FLUSH_ADDR 0
+#define INVPCID_FLUSH_PCID 1
+#define INVPCID_FLUSH_NONGLOBAL 2
+#define INVPCID_FLUSH_GLOBAL    3
+
+static inline void __invpcid(u16 func,u64 addr, u16 pcid)
+{
+        volatile struct {
+                u64 pcid;
+                u64 addr; } desc;
+        desc.pcid = pcid;
+        desc.addr = addr;
+        asm volatile("invpcid (%%rax), %%rbx" ::"b"(func), "a"(&desc):"memory");
+      
+}
+extern atomic_t pcid_current_generation;
+extern atomic_t pcid_current_block;
+DECLARE_PER_CPU(pcid_t, current_pcid);
+DECLARE_PER_CPU(pcid_t, max_pcid_block);
+DECLARE_PER_CPU(pcid_generation_t, cpu_pcid_generation);
+#endif
 #ifdef CONFIG_PARAVIRT
 #include <asm/paravirt.h>
 #else
@@ -39,14 +61,14 @@ static inline void __native_flush_tlb_global(void)
 
 static inline void __native_flush_tlb(void)
 {
-	static struct{
+	struct{
 		u64 t1;
 		u64 t2;
 	} zero_desc = {0,0};
 #ifdef CONFIG_MM_PCID
-	if(cpu_has_pcid  && (native_read_cr4() & X86_CR4_PCIDE)) /* INVPCID function 2: Flush everything*/
-		/*__native_flush_tlb_global();*/
-		asm volatile (" invpcid (%%rax),%%rbx" ::"b"(3ul), "a"(&zero_desc): );
+	if(percpu_read_stable(cpu_pcid_generation)) /* INVPCID function 2: Flush everything*/
+		__native_flush_tlb_global();
+                /*	asm volatile (" invpcid (%%rax),%%rbx" ::"b"(2ul), "a"(&zero_desc): ); */
 
 	else
 #endif
@@ -106,7 +128,11 @@ static inline void __flush_tlb_one(unsigned long addr)
 
 static inline void flush_tlb_mm(struct mm_struct *mm)
 {
-	if (mm == current->active_mm)
+#if 0 
+        if(mm->context.pcid  != 0)
+                __invpcid(INVPCID_FLUSH_PCID,0,mm->context.pcid);
+#endif
+        if (mm == current->active_mm)
 		__flush_tlb();
 }
 
