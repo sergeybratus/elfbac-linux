@@ -287,7 +287,7 @@ void flush_tlb_current_task(void)
 void flush_tlb_mm(struct mm_struct *mm)
 {
 	preempt_disable();
-#ifdef CONFIG_MM_PCID
+#if 0 // def CONFIG_MM_PCID
         if(mm->context.pcid && 0){
 //                __invpcid(INVPCID_FLUSH_PCID,0,mm->context.pcid);
                 mm->context.pcid_generation = 0;
@@ -301,7 +301,7 @@ void flush_tlb_mm(struct mm_struct *mm)
 		else
 			leave_mm(smp_processor_id());
 	}
-#ifdef CONFIG_MM_PCID
+#if 0 
         }
 #endif
 	if (cpumask_any_but(mm_cpumask(mm), smp_processor_id()) < nr_cpu_ids)

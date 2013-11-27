@@ -497,6 +497,7 @@ int elfp_os_change_context(elfp_process_t *tsk,struct elfp_state *state,elfp_int
 	//  elfp_os_change_stack(tsk,state->stack,regs);
 	// }
 	switch_mm(oldmm,tsk->elf_policy_mm,tsk);
+        tsk->active_mm = tsk->elf_policy_mm;
 	//local_irq_enable();
 	spin_unlock(&(tsk->alloc_lock));
 	return 0;

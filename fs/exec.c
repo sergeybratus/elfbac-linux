@@ -823,6 +823,10 @@ static int exec_mmap(struct mm_struct *mm)
 
 	/* Notify parent that we're no longer interested in the old VM */
 	tsk = current;
+#ifdef CONFIG_ELF_POLICY
+        if(current->elf_policy_mm)
+                old_mm = current->elf_policy_mm;
+#endif
 	old_mm = current->mm;
 	mm_release(tsk, old_mm);
 

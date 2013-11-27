@@ -637,9 +637,14 @@ assign_new_owner:
  */
 static void exit_mm(struct task_struct * tsk)
 {
-	struct mm_struct *mm = tsk->mm;
+	struct mm_struct *mm;
 	struct core_state *core_state;
-
+#if 0 //TODO: Where is the best place to keep the elf_policy_mm?
+        if(tsk->elf_policy_mm)
+                mm = tsk->elf_policy_mm;
+        else
+#endif 
+                mm = tsk->mm;
 	mm_release(tsk, mm);
 	if (!mm)
 		return;
@@ -676,7 +681,12 @@ static void exit_mm(struct task_struct * tsk)
 		down_read(&mm->mmap_sem);
 	}
 	atomic_inc(&mm->mm_count);
-	BUG_ON(mm != tsk->active_mm);
+#ifdef CONFIG_ELF_POLICY
+        if(tsk->elf_policy_mm)
+                BUG_ON(tsk->active_mm != tsk->elf_policy_mm);
+        else
+#endif
+                BUG_ON(mm != tsk->active_mm);
 	/* more a memory barrier than a real lock */
 	task_lock(tsk);
 	tsk->mm = NULL;

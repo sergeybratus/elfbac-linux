@@ -2060,9 +2060,9 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	else
 		mm = next->mm;
 #endif
-#ifdef CONFIG_ELF_POLICY
+#if 0 //def CONFIG_ELF_POLICY
 	if(prev->elf_policy_mm){
-          BUG_ON(prev->active_mm != prev->mm);
+                // BUG_ON(prev->active_mm != prev->mm);
           oldmm = prev->elf_policy_mm;
 	}else
 #endif
