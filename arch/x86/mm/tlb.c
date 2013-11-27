@@ -283,17 +283,19 @@ void flush_tlb_current_task(void)
 		flush_tlb_others(mm_cpumask(mm), mm, TLB_FLUSH_ALL);
 	preempt_enable();
 }
-
 void flush_tlb_mm(struct mm_struct *mm)
 {
-	preempt_disable();
-
-	if (current->active_mm == mm) {
+	preempt_disable(); 
+        if (percpu_read(cpu_tlbstate.active_mm) == mm) {
 		if (current->mm)
 			local_flush_tlb();
 		else
 			leave_mm(smp_processor_id());
 	}
+#ifdef CONFIG_PCID_MM
+        else if(mm->context.pcid)
+                mm->context.pcid_generation = 0; /* Will cause this to get a new PCID*/
+#endif
 	if (cpumask_any_but(mm_cpumask(mm), smp_processor_id()) < nr_cpu_ids)
 		flush_tlb_others(mm_cpumask(mm), mm, TLB_FLUSH_ALL);
 

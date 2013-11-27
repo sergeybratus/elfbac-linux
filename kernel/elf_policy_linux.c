@@ -452,6 +452,7 @@ void elfp_os_invalidate_clones(struct mm_struct *mm,
 		struct mm_struct *clone = mm->elfp_clones;
 		while(clone){
                   pte_range_nuke(clone,start,end);
+                  flush_tlb_mm(clone);
                   assert_is_pagetable_subset(clone,mm);
                   clone = clone->elfp_clones;
 		}

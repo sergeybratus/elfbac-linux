@@ -39,12 +39,13 @@ static inline void __native_flush_tlb_global(void)
 
 static inline void __native_flush_tlb(void)
 {
-
+#if 0
 	if(cpu_has_pcid) /* INVPCID function 2: Flush everything*/
 		__native_flush_tlb_global();
 		/* asm volatile ("movq $2, %%rax; invpcid (%%rdx),%%rax" ::: "rax"); */
 
 	else
+#endif 
 		native_write_cr3(native_read_cr3());
 }
 static inline void __native_flush_tlb_single(unsigned long addr)

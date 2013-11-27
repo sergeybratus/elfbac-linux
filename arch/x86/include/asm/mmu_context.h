@@ -58,7 +58,7 @@ static inline void switch_mm(struct mm_struct *prev, struct mm_struct *next,
 			pcid_t pcid;
 newpcid:	pcid = get_cpu_var(current_pcid)++;
 			if(unlikely(__get_cpu_var(cpu_pcid_generation) != global_gen)){
-				local_flush_tlb();
+			        __flush_tlb_global();
 				__get_cpu_var(cpu_pcid_generation) = global_gen;
 				pcid = PCID_MAX + 1; /* will be larger than max_pcid_block */
 			}
@@ -85,7 +85,7 @@ newblock:		pcid_block = atomic_add_return(PCID_BLOCK_SIZE, &pcid_current_block);
 						global_gen = 1;
 					}
 					printk("PCID generation reset. CPU %u PCID %d pcid_generation %d \n",cpu, pcid, next->context.pcid_generation);
-					local_flush_tlb();
+				        __flush_tlb_global();
 					goto newblock;
 				}
 			}
