@@ -535,7 +535,7 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping
       return -EINVAL;
     }
   assert_is_pagetable_subset(to,from->mm);
-  copy_page_range_dumb(to,from->mm,map,map->vm_start,map->vm_end,!(type&ELFP_RW_WRITE), !(type&ELFP_RW_EXEC));
+  copy_page_range_dumb(to,from->mm,map,map->vm_start,map->vm_end,(map->vm_flags & VM_WRITE) && !(type&ELFP_RW_WRITE), (map->vm_flags & VM_EXEC) && !(type&ELFP_RW_EXEC));
   assert_is_pagetable_subset(to,from->mm);
   return 0;
 }
