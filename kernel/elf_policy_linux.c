@@ -527,7 +527,7 @@ int elfp_os_tag_memory(elfp_process_t *tsk, unsigned long start, unsigned long e
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping map, unsigned short type){
   /* FIXME: Implement support for type */
-  
+        printk(KERN_DEBUG "copy_mapping %p - %p state %d\n", map->vm_start,map->vm_end,  current->elfp_current->id);
   BUG_ON(map->vm_mm!= from->mm);
   if(!(type & ELFP_RW_READ)) // TODO: Warn - 
     {
