@@ -68,6 +68,7 @@ static void elfp_mmu_notifier_invalidate_page(struct mmu_notifier *mn,
 static int copy_pte_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
                         pmd_t *dst_pmd, pmd_t *src_pmd, struct vm_area_struct *vma,
                         unsigned long addr, unsigned long end, int drop_write,int drop_exec) {
+
   pte_t *orig_src_pte, *orig_dst_pte;
   pte_t *src_pte, *dst_pte;
   spinlock_t *src_ptl, *dst_ptl;
@@ -448,6 +449,7 @@ static void pte_range_nuke(struct mm_struct *mm_clone, unsigned long addr, unsig
 void elfp_os_invalidate_clones(struct mm_struct *mm,
 			unsigned long start, unsigned long end){
   	BUG_ON(start>=end);
+//        printk(KERN_DEBUG "invalidate %p - %p\n",start,end);
 	if(mm->elfp_clones){
 		struct mm_struct *clone = mm->elfp_clones;
 		while(clone){
@@ -527,7 +529,7 @@ int elfp_os_tag_memory(elfp_process_t *tsk, unsigned long start, unsigned long e
 }
 int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping map, unsigned short type){
   /* FIXME: Implement support for type */
-        printk(KERN_DEBUG "copy_mapping %p - %p state %d\n", map->vm_start,map->vm_end,  current->elfp_current->id);
+//        printk(KERN_DEBUG "copy_mapping %p - %p state %d\n", map->vm_start,map->vm_end,  current->elfp_current->id);
   BUG_ON(map->vm_mm!= from->mm);
   if(!(type & ELFP_RW_READ)) // TODO: Warn - 
     {
@@ -538,6 +540,32 @@ int elfp_os_copy_mapping(elfp_process_t *from,elfp_context_t *to,elfp_os_mapping
   copy_page_range_dumb(to,from->mm,map,map->vm_start,map->vm_end,(map->vm_flags & VM_WRITE) && !(type&ELFP_RW_WRITE), (map->vm_flags & VM_EXEC) && !(type&ELFP_RW_EXEC));
   assert_is_pagetable_subset(to,from->mm);
   return 0;
+}
+struct elfp_data_transition *elfp_os_find_data_transition(struct elfp_state *state,unsigned long tag){
+  elfp_tree_node *node = state->data.rb_node;
+  while(node){
+    struct elfp_data_transition *transition = container_of(node,struct elfp_data_transition,tree);
+    if(tag < transition->tag)
+      node=node->rb_left;
+    else if(tag > transition->tag)
+      node=node->rb_right;
+    else 
+      return transition;
+  }
+  return NULL;
+}
+struct elfp_call_transition *elfp_os_find_call_transition(struct elfp_state *state,uintptr_t address){ /*FIXME:                   Make generic with macros */
+  struct rb_node *node = state->calls.rb_node;
+  while(node){
+    struct elfp_call_transition * transition = container_of(node,struct elfp_call_transition,tree);
+    if(address < transition->offset)
+      node = node->rb_left;
+    else if(address > transition->offset)
+      node = node->rb_right;
+    else
+      return transition;
+  }
+  return NULL;
 }
 void assert_task_elfbac_clones_valid(elfp_process_t *tsk)
 {
@@ -810,6 +838,16 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 }
 void debug_break_bug(){
 	printk("About to BUG out\n");
+}
+void elfp_notify_new_map( elfp_os_mapping map,unsigned long addr){
+        struct elfp_state *state = current->elfp_current;
+        
+        struct elfp_data_transition *transition;
+        if(!state)
+                return;
+        transition  = elfp_os_find_data_transition(state,elfp_os_mapping_tag(map));
+        if(transition && state == transition->to)
+                copy_page_range_dumb(current->elf_policy_mm, current->mm,map,addr & PAGE_MASK, (addr & PAGE_MASK) + PAGE_SIZE,(map->vm_flags & VM_WRITE) && !(transition->type&ELFP_RW_WRITE), (map->vm_flags & VM_EXEC) && !(transition->type&ELFP_RW_EXEC));
 }
 EXPORT_SYMBOL(debug_break_bug);
 

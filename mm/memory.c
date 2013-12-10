@@ -3206,6 +3206,11 @@ setpte:
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, address, page_table);
+#ifdef CONFIG_ELF_POLICY
+        pte_unmap_unlock(page_table,ptl);
+        elfp_notify_new_map(vma, address);
+        return 0;
+#endif
 unlock:
 	pte_unmap_unlock(page_table, ptl);
 	return 0;

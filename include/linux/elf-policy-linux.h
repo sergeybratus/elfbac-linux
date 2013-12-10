@@ -70,6 +70,8 @@ extern int vma_dup_at_addr(struct mm_struct *from, struct mm_struct *to,uintptr_
 extern elfp_context_t * dup_mm_empty(struct task_struct *tsk);
 extern void elfp_os_invalidate_clones(struct mm_struct *mm,
 				unsigned long start, unsigned long end);
+/*Notify that a single map has been added */
+extern void elfp_notify_new_map( elfp_os_mapping map,unsigned long addr);
 extern struct mmu_notifier elfp_mmu_notifier;
 #define elfp_os_errormsg printk
 #endif

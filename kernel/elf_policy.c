@@ -4,19 +4,6 @@
  * Released under the GPLv2/BSD dual license (except for the functions marked as such, which are just GPLv2)
  */
 #include "elf_policy_linux.c"
-struct elfp_call_transition *elfp_os_find_call_transition(struct elfp_state *state,uintptr_t address){ /*FIXME:                   Make generic with macros */
-  struct rb_node *node = state->calls.rb_node;
-  while(node){
-    struct elfp_call_transition * transition = container_of(node,struct elfp_call_transition,tree);
-    if(address < transition->offset)
-      node = node->rb_left;
-    else if(address > transition->offset)
-      node = node->rb_right;
-    else
-      return transition;
-  }
-  return NULL;
-}
 int elfp_handle_instruction_address_fault(uintptr_t address,
                                           elfp_process_t *tsk,elfp_os_mapping map,elfp_intr_state_t regs) {
   struct elfp_state *state = elfp_task_get_current_state(tsk);
@@ -53,19 +40,6 @@ int elfp_handle_instruction_address_fault(uintptr_t address,
  err_oom:
   BUG();
 }
-struct elfp_data_transition *elfp_os_find_data_transition(struct elfp_state *state,unsigned long tag){
-  elfp_tree_node *node = state->data.rb_node;
-  while(node){
-    struct elfp_data_transition *transition = container_of(node,struct elfp_data_transition,tree);
-    if(tag < transition->tag)
-      node=node->rb_left;
-    else if(tag > transition->tag)
-      node=node->rb_right;
-    else 
-      return transition;
-  }
-  return NULL;
-}
 /* TODO handle overlapping, etc with only different accesses */
 int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int access_type,elfp_os_mapping map,elfp_intr_state_t regs){
   struct elfp_state *state = elfp_task_get_current_state(tsk);
@@ -74,7 +48,7 @@ int elfp_handle_data_address_fault(uintptr_t address, elfp_process_t *tsk,int ac
   if(transition && transition->type & access_type){
     if(state == transition->to){ /* This will be forever
                                     allowed -> map permanently */
-      if(!elfp_os_copy_mapping(tsk,state->context, map,transition->type)) /* TODO change this lazy
+            if(!elfp_os_copy_mapping(tsk,state->context, map,transition->type)) /* TODO change this lazy
                                                                              copy to an eager copy ?*/
         return 1;
     }
