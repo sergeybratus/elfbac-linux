@@ -752,11 +752,11 @@ asmlinkage long sys_elf_policy(unsigned int function, unsigned int id,
 				send_sig(SIGKILL,current,0);
 				goto out;
 			}
-		}
 	out: 
 			kfree(elfp_buf);
       return 0;
-		break;
+
+		}		break;
 	case 500: /* DIRTY HACKS */
 		pcid_init();
 		return 0;
