@@ -3,6 +3,7 @@
  *  Copyright (C) 2001, 2002 Andi Kleen, SuSE Labs.
  *  Copyright (C) 2008-2009, Red Hat Inc., Ingo Molnar
  */
+#include <linux/magic.h>		/* STACK_END_MAGIC		*/
 #include <linux/sched.h>		/* test_thread_flag(), ...	*/
 #include <linux/kdebug.h>		/* oops_begin/end, ...		*/
 #include <linux/module.h>		/* search_exception_table	*/
@@ -14,7 +15,8 @@
 #include <linux/prefetch.h>		/* prefetchw			*/
 #include <linux/context_tracking.h>	/* exception_enter(), ...	*/
 #include <linux/uaccess.h>		/* faulthandler_disabled()	*/
-
+#include <linux/elf-policy.h>
+#include <linux/mm.h>
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
 #include <asm/pgalloc.h>		/* pgd_*(), ...			*/
 #include <asm/kmemcheck.h>		/* kmemcheck_*(), ...		*/
@@ -1024,7 +1026,7 @@ static int fault_in_kernel_space(unsigned long address)
 {
 	return address >= TASK_SIZE_MAX;
 }
-
+/* TODO: we should probably also check the write/nx bits on higher levels*/
 static inline bool smap_violation(int error_code, struct pt_regs *regs)
 {
 	if (!IS_ENABLED(CONFIG_X86_SMAP))
@@ -1042,6 +1044,25 @@ static inline bool smap_violation(int error_code, struct pt_regs *regs)
 	return true;
 }
 
+static int is_access_ok(struct mm_struct *mm,unsigned long address,unsigned int error_code){
+	pgd_t *pgd;
+	pud_t *pud;
+	pmd_t *pmd;
+	pte_t *pte;
+	int retval;
+	pgd = pgd_offset(mm,address);
+	if(pgd_none(*pgd) || !pgd_present(*pgd)) return 0;
+	pud = pud_offset(pgd,address);
+	if(pud_none(*pud) || !pud_present(*pud)) return 0;
+	pmd = pmd_offset(pud,address);
+	if(pmd_none(*pmd) || !pmd_present(*pmd)) return 0;
+	pte = pte_offset_map(pmd,address);
+	if(pte_none(*pte)){ pte_unmap(pte); return 0;}
+	if(!pte_present(*pte)){ pte_unmap(pte); return 0;}
+	retval = spurious_fault_check(error_code,pte);
+	pte_unmap(pte);
+	return retval;
+}
 /*
  * This routine handles page faults.  It determines the address,
  * and the problem, and then passes it off to one of the appropriate
@@ -1149,7 +1170,6 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
 		if (regs->flags & X86_EFLAGS_IF)
 			local_irq_enable();
 	}
-
 	perf_sw_event(PERF_COUNT_SW_PAGE_FAULTS, 1, regs, address);
 
 	if (error_code & PF_WRITE)
@@ -1187,17 +1207,13 @@ retry:
 		 */
 		might_sleep();
 	}
-
 	vma = find_vma(mm, address);
-	if (unlikely(!vma)) {
-		bad_area(regs, error_code, address);
-		return;
-	}
+	if (unlikely(!vma))
+		goto bad_area;
 	if (likely(vma->vm_start <= address))
 		goto good_area;
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
-		bad_area(regs, error_code, address);
-		return;
+		goto bad_area;
 	}
 	if (error_code & PF_USER) {
 		/*
@@ -1206,21 +1222,38 @@ retry:
 		 * and pusha to work. ("enter $65535, $31" pushes
 		 * 32 pointers and then decrements %sp by 65535.)
 		 */
-		if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp)) {
-			bad_area(regs, error_code, address);
-			return;
-		}
+		if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp))
+			goto bad_area;
 	}
-	if (unlikely(expand_stack(vma, address))) {
-		bad_area(regs, error_code, address);
-		return;
-	}
-
+	if (unlikely(expand_stack(vma, address)))
+		goto bad_area;
 	/*
 	 * Ok, we have a good vm_area for this memory access, so
 	 * we can handle it..
 	 */
-good_area:
+good_area:/* The faulting address is mapped in tsk->mm*/
+#ifdef CONFIG_ELF_POLICY
+	if(likely(tsk->elf_policy_mm) && likely(tsk->elf_policy)) {
+		if(is_access_ok(tsk->mm,address,error_code)){
+			if (error_code & PF_INSTR) {
+                          if (elfp_handle_instruction_address_fault(address, tsk,vma,regs)) 
+					goto out;
+				else{
+                                  printk(KERN_ERR "Killing process because of ELFBAC instruction fetch from %p [tag %lx, state %d]\n",(void *)address,vma->elfp_tag,tsk->elfp_current->id);
+					goto bad_area;
+				}
+			} else {
+				if (elfp_handle_data_address_fault(address, tsk, (error_code
+										  & PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ,vma,regs))
+					goto out;
+				else{
+                                  printk(KERN_ERR "Killing process because of ELFBAC data access at %p [tag %lx, state %d]\n",(void *)address,vma->elfp_tag, tsk->elfp_current->id);
+					goto bad_area;
+				}
+			}
+		}
+	}
+#endif
 	if (unlikely(access_error(error_code, vma))) {
 		bad_area_access_error(regs, error_code, address);
 		return;
@@ -1310,7 +1343,6 @@ trace_page_fault_entries(unsigned long address, struct pt_regs *regs,
 	else
 		trace_page_fault_kernel(address, regs, error_code);
 }
-
 dotraplinkage void notrace
 trace_do_page_fault(struct pt_regs *regs, unsigned long error_code)
 {

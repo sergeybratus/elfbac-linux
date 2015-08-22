@@ -84,10 +84,6 @@ static inline void cr4_set_bits_and_update_boot(unsigned long mask)
 	cr4_set_bits(mask);
 }
 
-static inline void __native_flush_tlb(void)
-{
-	native_write_cr3(native_read_cr3());
-}
 
 static inline void __native_flush_tlb_global_irq_disabled(void)
 {
@@ -116,6 +112,17 @@ static inline void __native_flush_tlb_global(void)
 	raw_local_irq_restore(flags);
 }
 
+static inline void __native_flush_tlb(void)
+{
+#if 0
+	if(cpu_has_pcid) /* INVPCID function 2: Flush everything*/
+		__native_flush_tlb_global();
+		/* asm volatile ("movq $2, %%rax; invpcid (%%rdx),%%rax" ::: "rax"); */
+
+	else
+#endif 
+		native_write_cr3(native_read_cr3());
+}
 static inline void __native_flush_tlb_single(unsigned long addr)
 {
 	asm volatile("invlpg (%0)" ::"r" (addr) : "memory");

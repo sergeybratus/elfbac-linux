@@ -57,6 +57,11 @@ static inline int huge_pte_none(pte_t pte)
 	return pte_none(pte);
 }
 
+static inline pte_t huge_pte_clrexec(pte_t pte)
+{
+       return pte_clrexec(pte);
+}
+
 static inline pte_t huge_pte_wrprotect(pte_t pte)
 {
 	return pte_wrprotect(pte);

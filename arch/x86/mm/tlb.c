@@ -166,7 +166,6 @@ void flush_tlb_current_task(void)
 		flush_tlb_others(mm_cpumask(mm), mm, 0UL, TLB_FLUSH_ALL);
 	preempt_enable();
 }
-
 /*
  * See Documentation/x86/tlb.txt for details.  We choose 33
  * because it is large enough to cover the vast majority (at
@@ -186,7 +185,7 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 	/* do a global flush by default */
 	unsigned long base_pages_to_flush = TLB_FLUSH_ALL;
 
-	preempt_disable();
+	preempt_disable(); 
 	if (current->active_mm != mm)
 		goto out;
 
@@ -194,6 +193,10 @@ void flush_tlb_mm_range(struct mm_struct *mm, unsigned long start,
 		leave_mm(smp_processor_id());
 		goto out;
 	}
+#ifdef CONFIG_PCID_MM
+        else if(mm->context.pcid)
+                mm->context.pcid_generation = 0; /* Will cause this to get a new PCID*/
+#endif
 
 	if ((end != TLB_FLUSH_ALL) && !(vmflag & VM_HUGETLB))
 		base_pages_to_flush = (end - start) >> PAGE_SHIFT;

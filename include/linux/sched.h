@@ -134,7 +134,9 @@ struct perf_event_context;
 struct blk_plug;
 struct filename;
 struct nameidata;
-
+#ifdef CONFIG_ELF_POLICY
+struct elf_policy_region;
+#endif
 #define VMACACHE_BITS 2
 #define VMACACHE_SIZE (1U << VMACACHE_BITS)
 #define VMACACHE_MASK (VMACACHE_SIZE - 1)
@@ -1409,6 +1411,14 @@ struct task_struct {
 	/* per-thread vma caching */
 	u32 vmacache_seqnum;
 	struct vm_area_struct *vmacache[VMACACHE_SIZE];
+#ifdef CONFIG_ELF_POLICY
+  /*TODO: Re-evaluate if some of this should rather go into mm_struct. ELF policy states are
+    per-mm. Implement full MxN sharing*/
+	struct mm_struct *elf_policy_mm; /* Used for pagefaulting */
+	struct elf_policy *elf_policy; /* Linked list of ELF policy segments*/
+	struct elfp_stack_frame *elfp_stack;
+	struct elfp_state *elfp_current; 
+#endif
 #if defined(SPLIT_RSS_COUNTING)
 	struct task_rss_stat	rss_stat;
 #endif

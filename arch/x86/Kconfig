@@ -2565,7 +2565,16 @@ config KEYS_COMPAT
 	depends on KEYS
 endif
 
+config ELF_POLICY
+	bool "ELF policy support" 
+	depends on X86_64 && MMU_NOTIFIER
+	default y
+config MM_PCID	
+	bool "Use tagged TLB(PCID) if available"
+	depends on X86_64
+	default	y
 endmenu
+
 
 
 config HAVE_ATOMIC_IOMAP

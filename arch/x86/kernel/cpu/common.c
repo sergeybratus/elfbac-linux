@@ -1316,9 +1316,29 @@ static void wait_for_master_cpu(int cpu)
  * initialized (naturally) in the bootstrap process, such as the GDT
  * and IDT. We reload them nevertheless, this function acts as a
  * 'CPU state barrier', nothing should get across.
- * A lot of state is already set up in PDA init for 64 bit
+ * A lot of state is already set up in PDA init for 64 bitgrep -lr '<<<<<<<' . | xargs git checkout --theirs
+
  */
 #ifdef CONFIG_X86_64
+
+#ifdef CONFIG_MM_PCID
+void cpu_init(void)
+atomic_t pcid_current_generation = ATOMIC_INIT(0);
+atomic_t pcid_current_block = ATOMIC_INIT(0);
+DEFINE_PER_CPU(pcid_t, current_pcid) = PCID_BEGIN;
+DEFINE_PER_CPU(pcid_t, max_pcid_block) = 0;
+DEFINE_PER_CPU(pcid_generation_t, cpu_pcid_generation) =0 ;
+void pcid_init(){
+	static bool boot_cpu = true;
+	if(cpu_has_pcid){
+		if(boot_cpu)
+			atomic_set(&pcid_current_generation,1);
+		set_in_cr4(X86_CR4_PCIDE);
+	}
+}
+#else
+void pcid_init() {}
+#endif
 
 void cpu_init(void)
 {
@@ -1461,8 +1481,11 @@ void cpu_init(void)
 	load_TR_desc();
 	load_mm_ldt(&init_mm);
 
+#ifdef CONFIG_MM_PCID 
+        if(cpu_has_pcid)
+          set_in_cr4(X86_CR4_PCIDE);
+#endif
 	t->x86_tss.io_bitmap_base = offsetof(struct tss_struct, io_bitmap);
-
 #ifdef CONFIG_DOUBLEFAULT
 	/* Set up doublefault TSS pointer in the GDT */
 	__set_tss_desc(cpu, GDT_ENTRY_DOUBLEFAULT_TSS, &doublefault_tss);

@@ -58,6 +58,7 @@
 #include <linux/elf.h>
 #include <linux/gfp.h>
 #include <linux/migrate.h>
+#include <linux/elf-policy.h>
 #include <linux/string.h>
 #include <linux/dma-debug.h>
 #include <linux/debugfs.h>
@@ -1001,8 +1002,10 @@ static inline int copy_pud_range(struct mm_struct *dst_mm, struct mm_struct *src
 	} while (dst_pud++, src_pud++, addr = next, addr != end);
 	return 0;
 }
-
-int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+/* ELFbac requires that sometimes we just copy ALL page tables. The regular
+ * copy_page_range has some optimisations when a PF handler would fill them
+ */
+int copy_page_range_force(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		struct vm_area_struct *vma)
 {
 	pgd_t *src_pgd, *dst_pgd;
@@ -1013,16 +1016,6 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	unsigned long mmun_end;		/* For mmu_notifiers */
 	bool is_cow;
 	int ret;
-
-	/*
-	 * Don't copy ptes where a page fault will fill them correctly.
-	 * Fork becomes much lighter when there are big shared or private
-	 * readonly mappings. The tradeoff is that copy_page_range is more
-	 * efficient than faulting.
-	 */
-	if (!(vma->vm_flags & (VM_HUGETLB | VM_PFNMAP | VM_MIXEDMAP)) &&
-			!vma->anon_vma)
-		return 0;
 
 	if (is_vm_hugetlb_page(vma))
 		return copy_hugetlb_page_range(dst_mm, src_mm, vma);
@@ -1068,7 +1061,22 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 		mmu_notifier_invalidate_range_end(src_mm, mmun_start, mmun_end);
 	return ret;
 }
+int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
+		struct vm_area_struct *vma)
+{
 
+	/*
+	 * Don't copy ptes where a page fault will fill them correctly.
+	 * Fork becomes much lighter when there are big shared or private
+	 * readonly mappings. The tradeoff is that copy_page_range is more
+	 * efficient than faulting.
+	 */
+	if (!(vma->vm_flags & (VM_HUGETLB|VM_NONLINEAR|VM_PFNMAP|VM_INSERTPAGE))) {
+		if (!vma->anon_vma)
+			return 0;
+	}
+	return copy_page_range_force(dst_mm,src_mm,vma);
+}
 static unsigned long zap_pte_range(struct mmu_gather *tlb,
 				struct vm_area_struct *vma, pmd_t *pmd,
 				unsigned long addr, unsigned long end,
@@ -2722,6 +2730,11 @@ setpte:
 
 	/* No need to invalidate - it was non-present before */
 	update_mmu_cache(vma, address, page_table);
+#ifdef CONFIG_ELF_POLICY
+        pte_unmap_unlock(page_table,ptl);
+        elfp_notify_new_map(vma, address);
+        return 0;
+#endif
 unlock:
 	pte_unmap_unlock(page_table, ptl);
 	return 0;
@@ -3699,7 +3712,39 @@ int access_process_vm(struct task_struct *tsk, unsigned long addr,
 	struct mm_struct *mm;
 	int ret;
 
-	mm = get_task_mm(tsk);
+#ifdef CONFIG_ELF_POLICY_PTRACE
+	if(tsk->elf_policy_mm)
+	{ /* from get_task_mm */
+		struct vm_area_struct *vma;
+retry:		task_lock(tsk);
+		mm = tsk->elf_policy_mm;
+		if(tsk->flags & PF_KTHREAD)
+			mm = NULL;
+		else
+			atomic_inc(&mm->mm_users);
+		vma = find_vma(mm,addr);
+		task_unlock(tsk);
+		//TODO: We just violate our policy here.
+		 if(!vma || vma->vm_start > addr+len)
+		{
+			/*	if(elfp_handle_data_address_fault(addr,tsk,write ? ELFP_RW_WRITE : ELFP_RW_READ,NULL))
+				goto retry;
+				else */
+			vma = find_vma(tsk->mm,addr);
+			if(vma && vma->vm_start <= addr+len){
+				//elfp_os_copy_mapping(tsk,mm,addr,addr+len);
+				printk(KERN_ERR " Debugging with non-ELFBAC page %p", addr);
+				mmput(mm);
+				mm= get_task_mm(tsk);
+			}
+		} 
+	}
+	else
+#endif 
+		mm = get_task_mm(tsk);
+#ifdef CONFIG_ELF_POLICY
+	//elfp_os_invalidate_clones(mm,addr,addr+len);
+#endif
 	if (!mm)
 		return 0;
 

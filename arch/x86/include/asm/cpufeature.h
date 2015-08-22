@@ -399,6 +399,7 @@ extern const char * const x86_bug_flags[NBUGINTS*32];
 #define cpu_has_cx8		boot_cpu_has(X86_FEATURE_CX8)
 #define cpu_has_cx16		boot_cpu_has(X86_FEATURE_CX16)
 #define cpu_has_eager_fpu	boot_cpu_has(X86_FEATURE_EAGER_FPU)
+#define cpu_has_pcid	boot_cpu_has(X86_FEATURE_PCID)
 #define cpu_has_topoext		boot_cpu_has(X86_FEATURE_TOPOEXT)
 #define cpu_has_bpext		boot_cpu_has(X86_FEATURE_BPEXT)
 

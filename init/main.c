@@ -93,6 +93,8 @@ static int kernel_init(void *);
 extern void init_IRQ(void);
 extern void fork_init(void);
 extern void radix_tree_init(void);
+extern void free_initmem(void);
+extern void elfp_init(void);
 #ifndef CONFIG_DEBUG_RODATA
 static inline void mark_rodata_ro(void) { }
 #endif
@@ -678,7 +680,9 @@ asmlinkage __visible void __init start_kernel(void)
 	}
 
 	ftrace_init();
-
+#ifdef CONFIG_ELF_POLICY
+	elfp_init();
+#endif
 	/* Do the rest non-__init'ed, we're now alive */
 	rest_init();
 }

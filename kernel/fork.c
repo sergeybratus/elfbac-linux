@@ -72,10 +72,10 @@
 #include <linux/khugepaged.h>
 #include <linux/signalfd.h>
 #include <linux/uprobes.h>
+#include <linux/elf-policy.h>
 #include <linux/aio.h>
 #include <linux/compiler.h>
 #include <linux/sysctl.h>
-
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
 #include <asm/uaccess.h>
@@ -228,6 +228,11 @@ void free_task(struct task_struct *tsk)
 	ftrace_graph_exit_task(tsk);
 	put_seccomp_filter(tsk);
 	arch_release_task_struct(tsk);
+#ifdef CONFIG_ELF_POLICY
+	if(tsk->elf_policy)
+		elfp_task_release_policy(tsk->elf_policy);
+	tsk->elf_policy = NULL;
+#endif
 	free_task_struct(tsk);
 }
 EXPORT_SYMBOL(free_task);
@@ -601,12 +606,14 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 	mm_init_cpumask(mm);
 	mm_init_aio(mm);
 	mm_init_owner(mm, p);
+	#ifdef CONFIG_ELF_POLICY
+	mm->elfp_clones = NULL;
+       	#endif
 	mmu_notifier_mm_init(mm);
 	clear_tlb_flush_pending(mm);
 #if defined(CONFIG_TRANSPARENT_HUGEPAGE) && !USE_SPLIT_PMD_PTLOCKS
 	mm->pmd_huge_pte = NULL;
 #endif
-
 	if (current->mm) {
 		mm->flags = current->mm->flags & MMF_INIT_MASK;
 		mm->def_flags = current->mm->def_flags & VM_INIT_DEF_MASK;
@@ -940,9 +947,28 @@ free_pt:
 fail_nomem:
 	return NULL;
 }
+#ifdef CONFIG_ELF_POLICY
 
+static int copy_elfp(struct task_struct *tsk){
+  struct elf_policy *clone = elfp_clone_policy(tsk->elf_policy,tsk);
+  struct elfp_state *curr;
+  if(!clone)
+    return -ENOMEM;
+  curr  = elfp_find_state_by_id(clone,tsk->elfp_current->id);
+  BUG_ON(!curr);
+ 
+  tsk->elf_policy = clone; /*do_fork copies the task struct without refcount*/
+  tsk->elfp_stack  = elfp_copy_stack(tsk->elfp_stack, tsk->elf_policy);  /*TODO: Are threads allowed to return? -> copy the stack */
+  tsk->elfp_current = curr; 
+  tsk->elf_policy_mm = curr->context;
+  
+  return 0;
+
+}
+#endif
 static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 {
+
 	struct mm_struct *mm, *oldmm;
 	int retval;
 
@@ -954,7 +980,6 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 
 	tsk->mm = NULL;
 	tsk->active_mm = NULL;
-
 	/*
 	 * Are we cloning a kernel thread?
 	 *
@@ -977,10 +1002,17 @@ static int copy_mm(unsigned long clone_flags, struct task_struct *tsk)
 	mm = dup_mm(tsk);
 	if (!mm)
 		goto fail_nomem;
-
+        
 good_mm:
 	tsk->mm = mm;
 	tsk->active_mm = mm;
+#ifdef CONFIG_ELF_POLICY
+        if(!(clone_flags & CLONE_VM) && tsk->elf_policy){
+          retval = copy_elfp(tsk);
+          if(retval)
+            goto fail_nomem;
+        }
+#endif
 	return 0;
 
 fail_nomem:
@@ -2089,4 +2121,37 @@ int sysctl_max_threads(struct ctl_table *table, int write,
 	set_max_threads(threads);
 
 	return 0;
+}
+struct mm_struct * dup_mm_empty(struct task_struct *tsk ){ 
+	struct mm_struct *mm, *oldmm = tsk->mm;
+
+
+	if (!oldmm)
+		return NULL;
+	mm = allocate_mm();
+	if (!mm)
+		goto fail_nomem;
+	memcpy(mm, oldmm, sizeof(*mm));
+	mm_init_cpumask(mm);
+	/* Initializing for Swap token stuff */
+	mm->token_priority = 0;
+	mm->last_interval = 0;
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
+	mm->pmd_huge_pte = NULL;
+#endif
+	if (!mm_init(mm, tsk))
+		goto fail_nomem;
+	if (init_new_context(tsk, mm))
+		goto fail_nocontext;
+	return mm;
+fail_nomem:
+	return NULL;
+fail_nocontext:
+	/*
+	 * If init_new_context() failed, we cannot use mmput() to free the mm
+	 * because it calls destroy_context()
+	 */
+	mm_free_pgd(mm);
+	free_mm(mm);
+	return NULL;
 }
