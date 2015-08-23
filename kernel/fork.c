@@ -2122,36 +2122,33 @@ int sysctl_max_threads(struct ctl_table *table, int write,
 
 	return 0;
 }
-struct mm_struct * dup_mm_empty(struct task_struct *tsk ){ 
-	struct mm_struct *mm, *oldmm = tsk->mm;
+struct mm_struct * dup_mm_empty(struct task_struct *tsk ){
+  
+	struct mm_struct *mm, *oldmm = current->mm;
 
-
-	if (!oldmm)
-		return NULL;
 	mm = allocate_mm();
 	if (!mm)
 		goto fail_nomem;
+
 	memcpy(mm, oldmm, sizeof(*mm));
-	mm_init_cpumask(mm);
-	/* Initializing for Swap token stuff */
-	mm->token_priority = 0;
-	mm->last_interval = 0;
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
-	mm->pmd_huge_pte = NULL;
-#endif
+
 	if (!mm_init(mm, tsk))
 		goto fail_nomem;
-	if (init_new_context(tsk, mm))
-		goto fail_nocontext;
+
+
+	mm->hiwater_rss = get_mm_rss(mm);
+	mm->hiwater_vm = mm->total_vm;
+
+	if (mm->binfmt && !try_module_get(mm->binfmt->module))
+		goto free_pt;
+
 	return mm;
+
+free_pt:
+	/* don't put binfmt in mmput, we haven't got module yet */
+	mm->binfmt = NULL;
+	mmput(mm);
+
 fail_nomem:
-	return NULL;
-fail_nocontext:
-	/*
-	 * If init_new_context() failed, we cannot use mmput() to free the mm
-	 * because it calls destroy_context()
-	 */
-	mm_free_pgd(mm);
-	free_mm(mm);
 	return NULL;
 }

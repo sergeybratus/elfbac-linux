@@ -1593,7 +1593,7 @@ static int do_execveat_common(int fd, struct filename *filename,
 		current->elf_policy_mm = NULL;
 		current->elfp_current = NULL;
 #endif
-	retval = exec_binprm
+                retval = exec_binprm(bprm);
 	if (retval < 0){
 #ifdef CONFIG_ELF_POLICY
 		current->elf_policy= old_pol;  /* restore state */

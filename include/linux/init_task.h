@@ -93,15 +93,15 @@ extern struct group_info init_groups;
 #define INIT_IDS
 #endif
 
-#ifdef CONFIG_PREEMPT_RCU
 #ifdef CONFIG_ELF_POLICY
 #define INIT_TASK_ELF_POLICY						\
-	.elf_policy_mm = NULL,							\
-	.elf_policy = NULL, 							\
-	.elfp_current = NULL
+	.elf_policy_mm = NULL,                                          \
+        .elf_policy = NULL,                                     \
+        .elfp_current = NULL,
 #else
 #define INIT_TASK_ELF_POLICY
 #endif
+#ifdef CONFIG_PREEMPT_RCU
 #define INIT_TASK_RCU_TREE_PREEMPT()					\
 	.rcu_blocked_node = NULL,
 #else
@@ -252,7 +252,7 @@ extern struct task_group root_task_group;
 	INIT_TASK_RCU_PREEMPT(tsk)					\
 	INIT_TASK_RCU_TASKS(tsk)					\
 	INIT_CPUSET_SEQ(tsk)						\
-	INIT_TASK_ELF_POLICY				\
+                 INIT_TASK_ELF_POLICY                                   \
 	INIT_RT_MUTEXES(tsk)						\
 	INIT_VTIME(tsk)							\
 	INIT_NUMA_BALANCING(tsk)					\

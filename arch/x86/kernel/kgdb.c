@@ -616,19 +616,22 @@ int kgdb_arch_init(void)
 	retval = register_die_notifier(&kgdb_notifier);
 	if (retval)
 		goto out;
-        nmi.handler = kgdb_nmi_handler;
-        nmi.flags = 0;
-        nmi.name = "kgdb";
-        retval = __setup_nmi(NMI_LOCAL,&nmi);
-        if(retval)
-          goto out1;
-        retval = __setup_nmi(NMI_UNKNOWN,&nmi);
-        if(retval)
-          goto out2;
+        
+	retval = register_nmi_handler(NMI_LOCAL, kgdb_nmi_handler,
+					0, "kgdb");
+	if (retval)
+		goto out1;
+
+	retval = register_nmi_handler(NMI_UNKNOWN, kgdb_nmi_handler,
+					0, "kgdb");
+
+	if (retval)
+		goto out2;
+
 	return retval;
 
 out2:
-	__free_nmi(NMI_LOCAL, "kgdb");
+	unregister_nmi_handler(NMI_LOCAL, "kgdb");
 out1:
 	unregister_die_notifier(&kgdb_notifier);
 out:

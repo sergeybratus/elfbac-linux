@@ -1,6 +1,5 @@
 #ifndef _ASM_X86_PROCESSOR_FLAGS_H
 #define _ASM_X86_PROCESSOR_FLAGS_H
-#define X86_CR4_PCIDE	0x00020000 /* Enable PCID support */
 
 #include <uapi/asm/processor-flags.h>
 

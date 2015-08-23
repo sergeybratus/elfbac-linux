@@ -1207,13 +1207,17 @@ retry:
 		 */
 		might_sleep();
 	}
+
 	vma = find_vma(mm, address);
-	if (unlikely(!vma))
-		goto bad_area;
+	if (unlikely(!vma)) {
+		bad_area(regs, error_code, address);
+		return;
+	}
 	if (likely(vma->vm_start <= address))
 		goto good_area;
 	if (unlikely(!(vma->vm_flags & VM_GROWSDOWN))) {
-		goto bad_area;
+		bad_area(regs, error_code, address);
+		return;
 	}
 	if (error_code & PF_USER) {
 		/*
@@ -1222,11 +1226,15 @@ retry:
 		 * and pusha to work. ("enter $65535, $31" pushes
 		 * 32 pointers and then decrements %sp by 65535.)
 		 */
-		if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp))
-			goto bad_area;
+                if (unlikely(address + 65536 + 32 * sizeof(unsigned long) < regs->sp)) {
+                        bad_area(regs, error_code, address);
+			return;
+		}
 	}
-	if (unlikely(expand_stack(vma, address)))
-		goto bad_area;
+        if (unlikely(expand_stack(vma, address))) {
+		bad_area(regs, error_code, address);
+		return;
+	}
 	/*
 	 * Ok, we have a good vm_area for this memory access, so
 	 * we can handle it..
@@ -1236,19 +1244,27 @@ good_area:/* The faulting address is mapped in tsk->mm*/
 	if(likely(tsk->elf_policy_mm) && likely(tsk->elf_policy)) {
 		if(is_access_ok(tsk->mm,address,error_code)){
 			if (error_code & PF_INSTR) {
-                          if (elfp_handle_instruction_address_fault(address, tsk,vma,regs)) 
-					goto out;
+                                if (elfp_handle_instruction_address_fault(address, tsk,vma,regs)){
+                                        up_read(&mm->mmap_sem);
+                                        return;
+                                }
+                          
 				else{
                                   printk(KERN_ERR "Killing process because of ELFBAC instruction fetch from %p [tag %lx, state %d]\n",(void *)address,vma->elfp_tag,tsk->elfp_current->id);
-					goto bad_area;
+                                  bad_area(regs, error_code, address);
+                                  return;
+
 				}
 			} else {
 				if (elfp_handle_data_address_fault(address, tsk, (error_code
-										  & PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ,vma,regs))
-					goto out;
+										  & PF_WRITE) ? ELFP_RW_WRITE : ELFP_RW_READ,vma,regs)){
+                                        up_read(&mm->mmap_sem);
+                                        return;
+                                }
 				else{
                                   printk(KERN_ERR "Killing process because of ELFBAC data access at %p [tag %lx, state %d]\n",(void *)address,vma->elfp_tag, tsk->elfp_current->id);
-					goto bad_area;
+                                  bad_area(regs, error_code, address);
+                                  return;
 				}
 			}
 		}

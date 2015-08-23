@@ -1311,18 +1311,9 @@ static void wait_for_master_cpu(int cpu)
 #endif
 }
 
-/*
- * cpu_init() initializes state that is per-CPU. Some data is already
- * initialized (naturally) in the bootstrap process, such as the GDT
- * and IDT. We reload them nevertheless, this function acts as a
- * 'CPU state barrier', nothing should get across.
- * A lot of state is already set up in PDA init for 64 bitgrep -lr '<<<<<<<' . | xargs git checkout --theirs
-
- */
 #ifdef CONFIG_X86_64
 
 #ifdef CONFIG_MM_PCID
-void cpu_init(void)
 atomic_t pcid_current_generation = ATOMIC_INIT(0);
 atomic_t pcid_current_block = ATOMIC_INIT(0);
 DEFINE_PER_CPU(pcid_t, current_pcid) = PCID_BEGIN;
@@ -1340,6 +1331,14 @@ void pcid_init(){
 void pcid_init() {}
 #endif
 
+/*
+ * cpu_init() initializes state that is per-CPU. Some data is already
+ * initialized (naturally) in the bootstrap process, such as the GDT
+ * and IDT. We reload them nevertheless, this function acts as a
+ * 'CPU state barrier', nothing should get across.
+ * A lot of state is already set up in PDA init for 64 bitgrep -lr '<<<<<<<' . | xargs git checkout --theirs
+
+ */
 void cpu_init(void)
 {
 	struct orig_ist *oist;

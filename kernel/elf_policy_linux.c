@@ -31,7 +31,7 @@
 #include <linux/perf_event.h>
 #include <linux/audit.h>
 #include <linux/khugepaged.h>
-
+#include <asm/setup.h>
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
 #include <asm/tlb.h>
@@ -41,7 +41,6 @@
 
 #include <linux/elf-policy.h>
 
-extern void pcid_init();
 static void assert_is_pagetable_subset(struct mm_struct *mm_a, struct mm_struct *mm_b);
 struct kmem_cache *elfp_slab_state, *elfp_slab_policy, *elfp_slab_call_transition, *elfp_slab_data_transition,*elfp_slab_stack_frame;
 
@@ -276,10 +275,10 @@ int copy_page_range_dumb(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	
 	nomem: return -ENOMEM;
 	}
-
+        /*
 	if (unlikely(is_pfn_mapping(vma))) {
 		BUG_ON("unsupported");
-	}
+                }*/
 	dst_pgd = pgd_offset(dst_mm, addr);
 	src_pgd = pgd_offset(src_mm, addr);
 	do {

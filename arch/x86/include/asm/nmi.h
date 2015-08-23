@@ -33,13 +33,8 @@ enum {
 
 #define NMI_DONE	0
 #define NMI_HANDLED	1
+
 typedef int (*nmi_handler_t)(unsigned int, struct pt_regs *);
-struct nmiaction {
-	struct list_head list;
-	nmi_handler_t handler;
-	unsigned int flags;
-	char *name;
-};
 
 struct nmiaction {
 	struct list_head	list;
@@ -63,8 +58,7 @@ struct nmiaction {
 int __register_nmi_handler(unsigned int, struct nmiaction *);
 
 void unregister_nmi_handler(unsigned int, const char *);
-struct nmiaction *__free_nmi(unsigned int type, const char *name);
-int __setup_nmi(unsigned int type, struct nmiaction *action);
+
 void stop_nmi(void);
 void restart_nmi(void);
 void local_touch_nmi(void);

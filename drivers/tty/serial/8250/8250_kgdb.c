@@ -27,6 +27,8 @@
 #include <linux/kgdb.h>
 #include <linux/interrupt.h>
 #include <linux/serial_reg.h>
+#include <linux/serial_core.h>
+#include <linux/serial_8250.h>
 #include <linux/ioport.h>
 #include <linux/io.h>
 #include <linux/ctype.h>
@@ -376,7 +378,7 @@ static int kgdb8250_late_init(void)
 	}
 
 	/* Take the port away from the main driver. */
-	hijacked_line = serial8250_find_port(&kgdb8250_port);
+	hijacked_line = serial8250_register_8250_port(&kgdb8250_port);
 	if (hijacked_line >= 0)
 		serial8250_unregister_port(hijacked_line);
 
@@ -416,7 +418,7 @@ static int kgdb8250_late_init(void)
 
 rollback:
 	if (hijacked_line >= 0)
-		serial8250_register_port(&kgdb8250_port);
+		serial8250_register_8250_port(&kgdb8250_port);
 
 	printk(KERN_CRIT "kgdb: Unable to reserve mandatory hardware "
 			 "resources.\n");
@@ -460,7 +462,7 @@ static void kgdb8250_cleanup(void)
 
 	/* Give the port back to the 8250 driver. */
 	if (hijacked_line >= 0)
-		serial8250_register_port(&kgdb8250_port);
+		serial8250_register_8250_port(&kgdb8250_port);
 }
 
 static int kgdb8250_set_config(const char *kmessage, struct kernel_param *kp)
